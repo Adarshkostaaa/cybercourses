@@ -192,6 +192,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout }) => {
       );
       localStorage.setItem('admin_purchases', JSON.stringify(updatedAdminPurchases));
       
+      // Also update recent purchases to maintain consistency
+      const recentPurchases = JSON.parse(localStorage.getItem('recent_purchases') || '[]');
+      const updatedRecentPurchases = recentPurchases.map((p: any) => 
+        p.id === purchaseId ? { 
+          ...p, 
+          payment_status: status,
+          approved_at: status === 'approved' ? approvedAt : undefined
+        } : p
+      );
+      localStorage.setItem('recent_purchases', JSON.stringify(updatedRecentPurchases));
+      
       // Update local state
       setPurchases(prev => prev.map(p => 
         p.id === purchaseId ? { 
