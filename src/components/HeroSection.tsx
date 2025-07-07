@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Users, Award, BookOpen, Zap, Code, Lock, Play, ChevronRight, Star, Globe, Terminal } from 'lucide-react';
 
-const HeroSection: React.FC = () => {
+interface HeroSectionProps {
+  onExploreCourses?: () => void;
+}
+
+const HeroSection: React.FC<HeroSectionProps> = ({ onExploreCourses }) => {
   const [currentText, setCurrentText] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
   const [typedText, setTypedText] = useState('');
@@ -52,6 +56,18 @@ const HeroSection: React.FC = () => {
 
     return () => clearInterval(typeInterval);
   }, [currentText]);
+
+  const handleExploreCourses = () => {
+    if (onExploreCourses) {
+      onExploreCourses();
+    } else {
+      // Fallback: scroll to courses section
+      const coursesSection = document.querySelector('main');
+      if (coursesSection) {
+        coursesSection.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  };
 
   return (
     <div className="relative bg-black text-white overflow-hidden min-h-screen flex items-center">
@@ -142,7 +158,10 @@ const HeroSection: React.FC = () => {
           {/* Mobile-First CTA Buttons */}
           <div className={`transition-all duration-1000 delay-500 ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
             <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 justify-center mb-8 sm:mb-12 px-4">
-              <button className="group relative bg-gradient-to-r from-cyan-600 to-purple-600 text-white px-6 sm:px-10 py-4 sm:py-5 rounded-xl font-bold text-base sm:text-lg hover:from-cyan-500 hover:to-purple-500 transition-all duration-300 transform hover:scale-105 font-mono border-2 border-cyan-400/50 hover:border-cyan-400 overflow-hidden">
+              <button 
+                onClick={handleExploreCourses}
+                className="group relative bg-gradient-to-r from-cyan-600 to-purple-600 text-white px-6 sm:px-10 py-4 sm:py-5 rounded-xl font-bold text-base sm:text-lg hover:from-cyan-500 hover:to-purple-500 transition-all duration-300 transform hover:scale-105 font-mono border-2 border-cyan-400/50 hover:border-cyan-400 overflow-hidden"
+              >
                 <span className="relative z-10 flex items-center justify-center space-x-2 sm:space-x-3">
                   <Zap className="h-5 w-5 sm:h-6 sm:w-6 animate-pulse" />
                   <span>EXPLORE COURSES</span>
