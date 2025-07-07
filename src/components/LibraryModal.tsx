@@ -66,9 +66,17 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
   }, [approvedCourses, searchTerm]);
 
   const loadUserCourses = (email: string) => {
-    // Load all courses for specific user email (both approved and pending)
+    // Load all courses for specific user email from admin purchases
     const adminPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
-    const userCourses = adminPurchases
+    
+    // Also check recent purchases from checkout
+    const recentPurchases = JSON.parse(localStorage.getItem('recent_purchases') || '[]');
+    
+    // Combine all purchases
+    const allPurchases = [...adminPurchases, ...recentPurchases];
+    
+    // Filter courses for this specific user email
+    const userCourses = allPurchases
       .filter((purchase: any) => 
         purchase.user_email.toLowerCase() === email.toLowerCase()
       )
@@ -81,7 +89,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         course_title: purchase.course_title,
         amount_paid: purchase.amount_paid,
         approved_at: purchase.approved_at || purchase.created_at,
-        status: purchase.payment_status,
+        status: purchase.payment_status || 'pending',
         has_access: purchase.payment_status === 'approved'
       }));
     
@@ -208,16 +216,6 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
       return;
     }
 
-    // Check if user has any courses (approved or pending)
-    const adminPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
-    const userCourses = adminPurchases.filter((purchase: any) => 
-      purchase.user_email.toLowerCase() === emailInput.toLowerCase()
-    );
-
-    if (userCourses.length === 0) {
-      setAuthError('No courses found for this account. Purchase a course first.');
-      return;
-    }
 
     // Sign in successful
     setUserEmail(emailInput);
@@ -588,14 +586,24 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
             <div className="text-center py-8 sm:py-12">
               <BookOpen className="h-12 w-12 sm:h-16 sm:w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg sm:text-xl font-semibold text-white mb-2 font-mono">
-                {approvedCourses.length === 0 ? "No Courses Yet" : "No Courses Found"}
+                {approvedCourses.length === 0 ? "No Purchases Found" : "No Courses Found"}
               </h3>
               <p className="text-gray-400 font-mono text-sm sm:text-base">
                 {approvedCourses.length === 0 
-                  ? "No courses found for your email yet. Purchase a course first!"
+                  ? "You haven't purchased any courses yet. Browse and purchase courses to see them here!"
                   : "No courses match your search criteria."
                 }
               </p>
+              {approvedCourses.length === 0 && (
+                <div className="mt-4">
+                  <button 
+                    onClick={onClose} 
+                    className="bg-gradient-to-r from-cyan-600 to-purple-600 text-white px-6 py-3 rounded-lg font-bold hover:from-cyan-700 hover:to-purple-700 transition-all duration-200 font-mono"
+                  >
+                    Browse Courses
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div>
@@ -733,7 +741,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
                           }`}>
                             {course.has_access 
                               ? '🚀 Click to Access Course Content' 
-                              : '⏳ Admin will approve your purchase soon'
+                              : '⏳ Your purchase is being reviewed by admin'
                             }
                           </span>
                         </div>
