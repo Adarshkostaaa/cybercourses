@@ -115,6 +115,20 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, course, 
       const existingPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
       existingPurchases.push(localPurchase);
       localStorage.setItem('admin_purchases', JSON.stringify(existingPurchases));
+      
+      // Also store in recent purchases for immediate library access
+      const recentPurchases = JSON.parse(localStorage.getItem('recent_purchases') || '[]');
+      // Check if this purchase already exists to avoid duplicates
+      const existingRecent = recentPurchases.find((p: any) => 
+        p.course_id === localPurchase.course_id && 
+        p.user_email === localPurchase.user_email
+      );
+      
+      if (!existingRecent) {
+        recentPurchases.push(localPurchase);
+      }
+      localStorage.setItem('recent_purchases', JSON.stringify(recentPurchases));
+      
       console.log('Purchase stored locally for admin processing');
       
       // Try to store in database as backup (don't block if it fails)
