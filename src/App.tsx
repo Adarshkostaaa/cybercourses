@@ -22,6 +22,7 @@ function AppContent() {
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
   const [isCartModalOpen, setIsCartModalOpen] = useState(false);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
+  const [libraryUserEmail, setLibraryUserEmail] = useState('');
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [selectedCourses, setSelectedCourses] = useState<Course[]>([]);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
@@ -54,8 +55,19 @@ function AppContent() {
   }, [searchTerm, selectedCategory]);
 
   const handleEnroll = (course: Course) => {
-    setSelectedCourse(course);
-    setIsCheckoutModalOpen(true);
+    // Check if user is signed in to library
+    const savedEmail = localStorage.getItem('library_user_email');
+    const savedRemember = localStorage.getItem('library_remember_me');
+    
+    if (savedEmail && savedRemember === 'true') {
+      // User is signed in, proceed to checkout
+      setLibraryUserEmail(savedEmail);
+      setSelectedCourse(course);
+      setIsCheckoutModalOpen(true);
+    } else {
+      // User not signed in, open library modal for sign in
+      setIsLibraryModalOpen(true);
+    }
   };
 
   const handleAddToCart = (course: Course) => {
@@ -63,8 +75,19 @@ function AppContent() {
   };
 
   const handleCartCheckout = (coursesToCheckout: Course[]) => {
-    setSelectedCourses(coursesToCheckout);
-    setIsCheckoutModalOpen(true);
+    // Check if user is signed in to library
+    const savedEmail = localStorage.getItem('library_user_email');
+    const savedRemember = localStorage.getItem('library_remember_me');
+    
+    if (savedEmail && savedRemember === 'true') {
+      // User is signed in, proceed to checkout
+      setLibraryUserEmail(savedEmail);
+      setSelectedCourses(coursesToCheckout);
+      setIsCheckoutModalOpen(true);
+    } else {
+      // User not signed in, open library modal for sign in
+      setIsLibraryModalOpen(true);
+    }
   };
 
   const handleViewCourse = (course: Course) => {
@@ -120,6 +143,13 @@ function AppContent() {
 
   const handleLibraryClick = () => {
     setIsLibraryModalOpen(true);
+  };
+
+  const handleLibrarySignIn = (email: string) => {
+    setLibraryUserEmail(email);
+    setIsLibraryModalOpen(false);
+    // If there was a pending checkout, proceed with it
+    // This will be handled by the library modal
   };
 
   if (showLanding) {
@@ -179,6 +209,9 @@ function AppContent() {
         <LibraryModal 
           isOpen={isLibraryModalOpen}
           onClose={() => setIsLibraryModalOpen(false)}
+          onSignIn={handleLibrarySignIn}
+          onSignIn={handleLibrarySignIn}
+          onSignIn={handleLibrarySignIn}
         />
 
         <CheckoutModal 
@@ -186,6 +219,9 @@ function AppContent() {
           onClose={() => setIsCheckoutModalOpen(false)}
           course={selectedCourse}
           courses={selectedCourses.length > 0 ? selectedCourses : undefined}
+          userEmail={libraryUserEmail}
+          userEmail={libraryUserEmail}
+          userEmail={libraryUserEmail}
         />
       </div>
     );
@@ -276,6 +312,7 @@ function AppContent() {
         }}
         course={selectedCourse}
         courses={selectedCourses.length > 0 ? selectedCourses : undefined}
+        userEmail={libraryUserEmail}
       />
     </div>
   );
