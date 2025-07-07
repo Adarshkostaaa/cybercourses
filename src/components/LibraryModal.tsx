@@ -93,7 +93,28 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         has_access: purchase.payment_status === 'approved'
       }));
     
-    setApprovedCourses(userCourses);
+    // Remove duplicates - keep only the latest status for each course
+    const uniqueCourses = userCourses.reduce((acc: any[], current: any) => {
+      const existingIndex = acc.findIndex(course => 
+        course.course_id === current.course_id && 
+        course.user_email === current.user_email
+      );
+      
+      if (existingIndex >= 0) {
+        const existing = acc[existingIndex];
+        // Keep the approved one if one is approved, otherwise keep the most recent
+        if (current.status === 'approved' || 
+            (existing.status !== 'approved' && new Date(current.approved_at) > new Date(existing.approved_at))) {
+          acc[existingIndex] = current;
+        }
+      } else {
+        acc.push(current);
+      }
+      
+      return acc;
+    }, []);
+    
+    setApprovedCourses(uniqueCourses);
   };
 
   const filterCourses = () => {
