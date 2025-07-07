@@ -25,9 +25,10 @@ interface LibraryUser {
 interface LibraryModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSignIn?: (email: string) => void;
 }
 
-const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
+const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }) => {
   const [approvedCourses, setApprovedCourses] = useState<LibraryEntry[]>([]);
   const [filteredCourses, setFilteredCourses] = useState<LibraryEntry[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -231,6 +232,11 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
       // Clear localStorage if remember me is not checked
       localStorage.removeItem('library_user_email');
       localStorage.removeItem('library_remember_me');
+    }
+
+    // Notify parent component about sign in
+    if (onSignIn) {
+      onSignIn(emailInput);
     }
 
     // Clear form
