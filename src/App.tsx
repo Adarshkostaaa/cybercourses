@@ -142,7 +142,18 @@ function AppContent() {
   };
 
   const handleLibraryClick = () => {
-    setIsLibraryModalOpen(true);
+    // Check if user is already signed in
+    const savedEmail = localStorage.getItem('library_user_email');
+    const savedRemember = localStorage.getItem('library_remember_me');
+    
+    if (savedEmail && savedRemember === 'true') {
+      // User is already signed in, open library directly
+      setLibraryUserEmail(savedEmail);
+      setIsLibraryModalOpen(true);
+    } else {
+      // User not signed in, open library modal for sign in
+      setIsLibraryModalOpen(true);
+    }
   };
 
   const handleLibrarySignIn = (email: string) => {
@@ -210,8 +221,6 @@ function AppContent() {
           isOpen={isLibraryModalOpen}
           onClose={() => setIsLibraryModalOpen(false)}
           onSignIn={handleLibrarySignIn}
-          onSignIn={handleLibrarySignIn}
-          onSignIn={handleLibrarySignIn}
         />
 
         <CheckoutModal 
@@ -219,8 +228,6 @@ function AppContent() {
           onClose={() => setIsCheckoutModalOpen(false)}
           course={selectedCourse}
           courses={selectedCourses.length > 0 ? selectedCourses : undefined}
-          userEmail={libraryUserEmail}
-          userEmail={libraryUserEmail}
           userEmail={libraryUserEmail}
         />
       </div>
@@ -309,6 +316,7 @@ function AppContent() {
           setIsCheckoutModalOpen(false);
           setSelectedCourse(null);
           setSelectedCourses([]);
+          setLibraryUserEmail('');
         }}
         course={selectedCourse}
         courses={selectedCourses.length > 0 ? selectedCourses : undefined}
