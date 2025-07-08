@@ -38,6 +38,15 @@ function AppContent() {
     if (savedAdminLogin === 'true' && adminRememberMe === 'true') {
       setIsAdminLoggedIn(true);
     }
+    
+    // Check for saved library user login
+    const savedLibraryEmail = localStorage.getItem('library_user_email');
+    const libraryRememberMe = localStorage.getItem('library_remember_me');
+    
+    if (savedLibraryEmail && libraryRememberMe === 'true') {
+      // User is already signed in to library
+      setLibraryUserEmail(savedLibraryEmail);
+    }
   }, []);
 
   const { addToCart } = useCart();
@@ -66,6 +75,8 @@ function AppContent() {
       setIsCheckoutModalOpen(true);
     } else {
       // User not signed in, open library modal for sign in
+      // Store the course they want to purchase for after sign in
+      localStorage.setItem('pending_course_purchase', JSON.stringify(course));
       setIsLibraryModalOpen(true);
     }
   };
@@ -86,6 +97,8 @@ function AppContent() {
       setIsCheckoutModalOpen(true);
     } else {
       // User not signed in, open library modal for sign in
+      // Store the courses they want to purchase for after sign in
+      localStorage.setItem('pending_cart_purchase', JSON.stringify(coursesToCheckout));
       setIsLibraryModalOpen(true);
     }
   };
@@ -158,9 +171,26 @@ function AppContent() {
 
   const handleLibrarySignIn = (email: string) => {
     setLibraryUserEmail(email);
+    
+    // Check if there was a pending course purchase
+    const pendingCourse = localStorage.getItem('pending_course_purchase');
+    const pendingCart = localStorage.getItem('pending_cart_purchase');
+    
+    if (pendingCourse) {
+      // User was trying to buy a single course
+      const course = JSON.parse(pendingCourse);
+      setSelectedCourse(course);
+      setIsCheckoutModalOpen(true);
+      localStorage.removeItem('pending_course_purchase');
+    } else if (pendingCart) {
+      // User was trying to checkout cart
+      const courses = JSON.parse(pendingCart);
+      setSelectedCourses(courses);
+      setIsCheckoutModalOpen(true);
+      localStorage.removeItem('pending_cart_purchase');
+    }
+    
     setIsLibraryModalOpen(false);
-    // If there was a pending checkout, proceed with it
-    // This will be handled by the library modal
   };
 
   if (showLanding) {
