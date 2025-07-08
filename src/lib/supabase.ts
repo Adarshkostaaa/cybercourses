@@ -25,27 +25,42 @@ export const testConnection = async () => {
   try {
     console.log('Testing Supabase connection...');
     
-    // Use a simple query with timeout
+    // Test with a simple query and shorter timeout
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Connection timeout')), 5000)
+      setTimeout(() => reject(new Error('Connection timeout')), 3000)
     );
     
-    const queryPromise = supabase
-      .from('purchases')
+    // Try to query library_users table first, then purchases as fallback
+    let queryPromise = supabase
+      .from('library_users')
       .select('id')
       .limit(1);
     
-    const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
+    let { data, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
     
     if (error) {
-      console.error('Connection test failed:', error);
-      return false;
+      console.log('library_users table test failed, trying purchases table:', error.message);
+      
+      // Try purchases table as fallback
+      queryPromise = supabase
+        .from('purchases')
+        .select('id')
+        .limit(1);
+        
+      const result = await Promise.race([queryPromise, timeoutPromise]) as any;
+      data = result.data;
+      error = result.error;
+      
+      if (error) {
+        console.error('Both table tests failed:', error);
+        return false;
+      }
     }
     
-    console.log('Connection test successful:', data);
+    console.log('Supabase connection test successful');
     return true;
   } catch (error) {
-    console.error('Connection test error (using fallback):', error);
+    console.log('Supabase connection test failed (will use localStorage fallback):', error);
     return false;
   }
 };
@@ -131,6 +146,29 @@ export interface Database {
           user_name?: string;
           course_title?: string;
           course_price?: number;
+        };
+      };
+      library_users: {
+        Row: {
+          id: string;
+          email: string;
+          password: string;
+          full_name: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          email: string;
+          password: string;
+          full_name: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          email?: string;
+          password?: string;
+          full_name?: string;
+          created_at?: string;
         };
       };
     };
