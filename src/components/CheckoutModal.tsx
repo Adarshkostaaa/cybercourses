@@ -95,6 +95,10 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, course, 
       // Create purchase data
       const purchaseAmount = coursesToCheckout.length === 1 ? finalPrice : Math.round((courseItem.price / totalOriginalPrice) * finalPrice);
       
+      // Get the user's registered email from library users if they're signed in
+      const savedEmail = localStorage.getItem('library_user_email');
+      const finalUserEmail = savedEmail || userEmail?.trim() || '';
+      
       // Always store locally first (guaranteed to work)
       const localPurchase = {
         id: `local_${Date.now()}_${courseItem.id}_${Math.random().toString(36).substr(2, 9)}`,
@@ -103,7 +107,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, course, 
         payment_status: 'pending',
         amount_paid: purchaseAmount,
         coupon_used: appliedCoupon || null,
-        user_email: userEmail?.trim() || '',
+        user_email: finalUserEmail,
         user_phone: userDetails.phone.trim(),
         user_name: userDetails.fullName.trim(),
         course_title: courseItem.title,
@@ -121,7 +125,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, course, 
       // Check if this purchase already exists to avoid duplicates
       const existingRecent = recentPurchases.find((p: any) => 
         p.course_id === localPurchase.course_id && 
-        p.user_email === localPurchase.user_email
+        p.user_email.toLowerCase() === localPurchase.user_email.toLowerCase()
       );
       
       if (!existingRecent) {
@@ -141,7 +145,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, course, 
             payment_status: 'pending' as const,
             amount_paid: purchaseAmount,
             coupon_used: appliedCoupon || null,
-            user_email: userEmail?.trim() || '',
+            user_email: finalUserEmail,
             user_phone: userDetails.phone.trim(),
             user_name: userDetails.fullName.trim(),
             course_title: courseItem.title,
