@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, BookOpen, Play, Clock, Star, Search, ExternalLink, Mail, User, Eye, EyeOff, LogOut, UserPlus, Lock, ArrowLeft } from 'lucide-react';
+import { supabase, testConnection } from '../lib/supabase';
 
 interface LibraryEntry {
   id: string;
@@ -25,9 +26,10 @@ interface LibraryUser {
 interface LibraryModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSignIn?: (email: string) => void;
 }
 
-const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
+const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }) => {
   const [approvedCourses, setApprovedCourses] = useState<LibraryEntry[]>([]);
   const [filteredCourses, setFilteredCourses] = useState<LibraryEntry[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -45,6 +47,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
   const [authError, setAuthError] = useState('');
   const [authSuccess, setAuthSuccess] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -65,9 +68,17 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
   }, [approvedCourses, searchTerm]);
 
   const loadUserCourses = (email: string) => {
-    // Load all courses for specific user email (both approved and pending)
+    // Load all courses for specific user email from admin purchases
     const adminPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
-    const userCourses = adminPurchases
+    
+    // Also check recent purchases from checkout
+    const recentPurchases = JSON.parse(localStorage.getItem('recent_purchases') || '[]');
+    
+    // Combine all purchases
+    const allPurchases = [...adminPurchases, ...recentPurchases];
+    
+    // Filter courses for this specific user email
+    const userCourses = allPurchases
       .filter((purchase: any) => 
         purchase.user_email.toLowerCase() === email.toLowerCase()
       )
@@ -80,11 +91,32 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
         course_title: purchase.course_title,
         amount_paid: purchase.amount_paid,
         approved_at: purchase.approved_at || purchase.created_at,
-        status: purchase.payment_status,
+        status: purchase.payment_status || 'pending',
         has_access: purchase.payment_status === 'approved'
       }));
     
-    setApprovedCourses(userCourses);
+    // Remove duplicates - keep only the latest status for each course
+    const uniqueCourses = userCourses.reduce((acc: any[], current: any) => {
+      const existingIndex = acc.findIndex(course => 
+        course.course_id === current.course_id && 
+        course.user_email === current.user_email
+      );
+      
+      if (existingIndex >= 0) {
+        const existing = acc[existingIndex];
+        // Keep the approved one if one is approved, otherwise keep the most recent
+        if (current.status === 'approved' || 
+            (existing.status !== 'approved' && new Date(current.approved_at) > new Date(existing.approved_at))) {
+          acc[existingIndex] = current;
+        }
+      } else {
+        acc.push(current);
+      }
+      
+      return acc;
+    }, []);
+    
+    setApprovedCourses(uniqueCourses);
   };
 
   const filterCourses = () => {
@@ -100,143 +132,253 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
     setFilteredCourses(filtered);
   };
 
-  const handleSignUp = () => {
-    setAuthError('');
-    setAuthSuccess('');
+  const findUserInStorage = async (email: string): Promise<LibraryUser | null> => {
+    const normalizedEmail = email.toLowerCase().trim();
     
-    // Validation
-    if (!fullName.trim()) {
-      setAuthError('Please enter your full name');
-      return;
-    }
-
-    if (!emailInput.trim()) {
-      setAuthError('Please enter your email address');
-      return;
-    }
-
-    if (!emailInput.includes('@')) {
-      setAuthError('Please enter a valid email address');
-      return;
-    }
-
-    if (!password.trim()) {
-      setAuthError('Please enter a password');
-      return;
-    }
-
-    if (password.length < 6) {
-      setAuthError('Password must be at least 6 characters long');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setAuthError('Passwords do not match');
-      return;
-    }
-
-    // Check if user already exists
+    // STEP 1: Check localStorage first (fastest)
     const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
-    const userExists = existingUsers.find((user: LibraryUser) => 
-      user.email.toLowerCase() === emailInput.toLowerCase()
+    const localUser = existingUsers.find((user: LibraryUser) => 
+      user.email.toLowerCase() === normalizedEmail
     );
-
-    if (userExists) {
-      setAuthError('An account with this email already exists. Please sign in instead.');
-      return;
-    }
-
-    // Create new user
-    const newUser: LibraryUser = {
-      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      email: emailInput.toLowerCase(),
-      password: password, // In production, this should be hashed
-      full_name: fullName.trim(),
-      created_at: new Date().toISOString()
-    };
-
-    // Save user to localStorage
-    existingUsers.push(newUser);
-    localStorage.setItem('library_users', JSON.stringify(existingUsers));
-
-    setAuthSuccess('Account created successfully! You can now sign in.');
     
-    // Clear form and switch to sign in
-    setTimeout(() => {
-      setCurrentView('signin');
-      setEmailInput('');
-      setPassword('');
-      setConfirmPassword('');
-      setFullName('');
-      setAuthSuccess('');
-      setAuthError('');
-    }, 2000);
+    if (localUser) {
+      console.log('User found in localStorage');
+      return localUser;
+    }
+    
+    // STEP 2: Check cloud database
+    try {
+      const connectionOk = await testConnection();
+      if (connectionOk) {
+        const { data, error } = await supabase
+          .from('library_users')
+          .select('*')
+          .eq('email', normalizedEmail)
+          .single();
+          
+        if (!error && data) {
+          console.log('User found in cloud database');
+          // Store in localStorage for future use
+          existingUsers.push(data);
+          localStorage.setItem('library_users', JSON.stringify(existingUsers));
+          return data;
+        }
+      }
+    } catch (error) {
+      console.log('Cloud database search failed, using localStorage only');
+    }
+    
+    // STEP 3: Check alternative storage locations
+    const alternativeKeys = [
+      'cybercourse_users',
+      'registered_users', 
+      'user_accounts',
+      'library_accounts',
+      'course_users'
+    ];
+    
+    for (const key of alternativeKeys) {
+      const altUsers = JSON.parse(localStorage.getItem(key) || '[]');
+      const altUser = altUsers.find((user: any) => 
+        user.email?.toLowerCase() === normalizedEmail
+      );
+      if (altUser) {
+        console.log(`User found in ${key}`);
+        return altUser;
+      }
+    }
+    
+    return null;
   };
 
-  const handleSignIn = () => {
-    setAuthError('');
-    
-    if (!emailInput.trim()) {
-      setAuthError('Please enter your email address');
-      return;
-    }
-
-    if (!emailInput.includes('@')) {
-      setAuthError('Please enter a valid email address');
-      return;
-    }
-
-    if (!password.trim()) {
-      setAuthError('Please enter your password');
-      return;
-    }
-
-    // Check if user exists and password matches
+  const storeUserEverywhere = async (user: LibraryUser) => {
+    // STEP 1: Store in localStorage (primary)
     const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
-    const user = existingUsers.find((user: LibraryUser) => 
-      user.email.toLowerCase() === emailInput.toLowerCase()
-    );
-
-    if (!user) {
-      setAuthError('No account found with this email. Please sign up first.');
-      return;
+    existingUsers.push(user);
+    localStorage.setItem('library_users', JSON.stringify(existingUsers));
+    
+    // STEP 2: Store in cloud database (if available)
+    try {
+      const connectionOk = await testConnection();
+      if (connectionOk) {
+        const { error } = await supabase
+          .from('library_users')
+          .insert([{
+            email: user.email,
+            password: user.password,
+            full_name: user.full_name
+          }]);
+          
+        if (error) {
+          console.warn('Cloud storage failed, but localStorage succeeded:', error);
+        } else {
+          console.log('User stored in cloud database successfully');
+        }
+      }
+    } catch (error) {
+      console.warn('Cloud storage failed, but localStorage succeeded:', error);
     }
+    
+    // STEP 3: Store in backup locations
+    const backupKeys = [
+      'cybercourse_users',
+      'registered_users',
+      'user_accounts',
+      'library_accounts'
+    ];
+    
+    backupKeys.forEach(key => {
+      const backupUsers = JSON.parse(localStorage.getItem(key) || '[]');
+      backupUsers.push(user);
+      localStorage.setItem(key, JSON.stringify(backupUsers));
+    });
+    
+    // STEP 4: Store in session storage as backup
+    sessionStorage.setItem('current_library_user', JSON.stringify(user));
+    sessionStorage.setItem('library_users_backup', JSON.stringify(existingUsers));
+  };
 
-    if (user.password !== password) {
-      setAuthError('Incorrect password. Please try again.');
-      return;
-    }
-
-    // Check if user has any courses (approved or pending)
-    const adminPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
-    const userCourses = adminPurchases.filter((purchase: any) => 
-      purchase.user_email.toLowerCase() === emailInput.toLowerCase()
-    );
-
-    if (userCourses.length === 0) {
-      setAuthError('No courses found for this account. Purchase a course first.');
-      return;
-    }
-
-    // Sign in successful
-    setUserEmail(emailInput);
-    setIsSignedIn(true);
-    loadUserCourses(emailInput);
-
-    // Save to localStorage if remember me is checked
-    if (rememberMe) {
-      localStorage.setItem('library_user_email', emailInput);
-      localStorage.setItem('library_remember_me', 'true');
-    } else {
-      // Clear localStorage if remember me is not checked
-      localStorage.removeItem('library_user_email');
-      localStorage.removeItem('library_remember_me');
-    }
-
-    // Clear form
-    setEmailInput('');
-    setPassword('');
+  const handleSignUp = async () => {
     setAuthError('');
+    setAuthSuccess('');
+    setIsLoading(true);
+    
+    try {
+      // Validation
+      if (!fullName.trim()) {
+        setAuthError('Please enter your full name');
+        return;
+      }
+
+      if (!emailInput.trim()) {
+        setAuthError('Please enter your email address');
+        return;
+      }
+
+      if (!emailInput.includes('@')) {
+        setAuthError('Please enter a valid email address');
+        return;
+      }
+
+      if (!password.trim()) {
+        setAuthError('Please enter a password');
+        return;
+      }
+
+      if (password.length < 6) {
+        setAuthError('Password must be at least 6 characters long');
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        setAuthError('Passwords do not match');
+        return;
+      }
+
+      // Check if user already exists
+      const existingUser = await findUserInStorage(emailInput);
+      if (existingUser) {
+        setAuthError('An account with this email already exists. Please sign in instead.');
+        return;
+      }
+
+      // Create new user
+      const newUser: LibraryUser = {
+        id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        email: emailInput.toLowerCase().trim(),
+        password: password,
+        full_name: fullName.trim(),
+        created_at: new Date().toISOString()
+      };
+
+      // Store user everywhere
+      await storeUserEverywhere(newUser);
+
+      setAuthSuccess('Account created successfully! You can now sign in.');
+      
+      // Clear form and switch to sign in
+      setTimeout(() => {
+        setCurrentView('signin');
+        setEmailInput('');
+        setPassword('');
+        setConfirmPassword('');
+        setFullName('');
+        setAuthSuccess('');
+        setAuthError('');
+      }, 2000);
+      
+    } catch (error) {
+      console.error('Signup error:', error);
+      setAuthError('An error occurred during signup. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSignIn = async () => {
+    setAuthError('');
+    setIsLoading(true);
+    
+    try {
+      if (!emailInput.trim()) {
+        setAuthError('Please enter your email address');
+        return;
+      }
+
+      if (!emailInput.includes('@')) {
+        setAuthError('Please enter a valid email address');
+        return;
+      }
+
+      if (!password.trim()) {
+        setAuthError('Please enter your password');
+        return;
+      }
+
+      // Find user in storage
+      const user = await findUserInStorage(emailInput);
+      
+      if (!user) {
+        setAuthError('No account found with this email. Please sign up first.');
+        return;
+      }
+
+      if (user.password !== password) {
+        setAuthError('Incorrect password. Please try again.');
+        return;
+      }
+
+      // Sign in successful
+      setUserEmail(emailInput);
+      setIsSignedIn(true);
+      loadUserCourses(emailInput);
+
+      // Save to localStorage if remember me is checked
+      if (rememberMe) {
+        localStorage.setItem('library_user_email', emailInput);
+        localStorage.setItem('library_remember_me', 'true');
+      } else {
+        // Clear localStorage if remember me is not checked
+        localStorage.removeItem('library_user_email');
+        localStorage.removeItem('library_remember_me');
+      }
+
+      // Notify parent component about sign in
+      if (onSignIn) {
+        onSignIn(emailInput);
+      }
+
+      // Clear form
+      setEmailInput('');
+      setPassword('');
+      setAuthError('');
+      
+    } catch (error) {
+      console.error('Sign in error:', error);
+      setAuthError('An error occurred during sign in. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSignOut = () => {
@@ -379,6 +521,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
                       className="w-full pl-10 pr-4 py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 font-mono text-sm"
                       placeholder="Enter your full name"
                       required
+                      disabled={isLoading}
                     />
                   </div>
                 </div>
@@ -398,6 +541,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
                     className="w-full pl-10 pr-4 py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 font-mono text-sm"
                     placeholder="Enter your email address"
                     required
+                    disabled={isLoading}
                   />
                 </div>
               </div>
@@ -416,11 +560,13 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
                     className="w-full pl-10 pr-12 py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 font-mono text-sm"
                     placeholder={currentView === 'signup' ? 'Create a password (min 6 chars)' : 'Enter your password'}
                     required
+                    disabled={isLoading}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-300 transition-colors duration-200"
+                    disabled={isLoading}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -442,11 +588,13 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
                       className="w-full pl-10 pr-12 py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 font-mono text-sm"
                       placeholder="Confirm your password"
                       required
+                      disabled={isLoading}
                     />
                     <button
                       type="button"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-300 transition-colors duration-200"
+                      disabled={isLoading}
                     >
                       {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -463,6 +611,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
                     className="w-4 h-4 text-cyan-400 bg-black/50 border border-cyan-400/30 rounded focus:ring-cyan-400 focus:ring-2"
+                    disabled={isLoading}
                   />
                   <label htmlFor="rememberMe" className="text-sm text-gray-300 font-mono">
                     Remember me
@@ -473,9 +622,17 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
               {/* Submit Button */}
               <button
                 onClick={currentView === 'signup' ? handleSignUp : handleSignIn}
-                className="w-full bg-gradient-to-r from-cyan-600 to-purple-600 text-white py-3 px-4 rounded-lg font-bold hover:from-cyan-700 hover:to-purple-700 transition-all duration-200 font-mono text-sm"
+                disabled={isLoading}
+                className="w-full bg-gradient-to-r from-cyan-600 to-purple-600 text-white py-3 px-4 rounded-lg font-bold hover:from-cyan-700 hover:to-purple-700 transition-all duration-200 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {currentView === 'signup' ? 'Create Account' : 'Access My Library'}
+                {isLoading ? (
+                  <div className="flex items-center justify-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>{currentView === 'signup' ? 'Creating Account...' : 'Signing In...'}</span>
+                  </div>
+                ) : (
+                  currentView === 'signup' ? 'Create Account' : 'Access My Library'
+                )}
               </button>
 
               {/* Switch View */}
@@ -491,6 +648,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
                     setFullName('');
                   }}
                   className="text-cyan-400 hover:text-cyan-300 transition-colors duration-200 font-mono text-sm"
+                  disabled={isLoading}
                 >
                   {currentView === 'signup' 
                     ? 'Already have an account? Sign In' 
@@ -582,14 +740,24 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
             <div className="text-center py-8 sm:py-12">
               <BookOpen className="h-12 w-12 sm:h-16 sm:w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg sm:text-xl font-semibold text-white mb-2 font-mono">
-                {approvedCourses.length === 0 ? "No Courses Yet" : "No Courses Found"}
+                {approvedCourses.length === 0 ? "No Purchases Found" : "No Courses Found"}
               </h3>
               <p className="text-gray-400 font-mono text-sm sm:text-base">
                 {approvedCourses.length === 0 
-                  ? "No courses found for your email yet. Purchase a course first!"
+                  ? "You haven't purchased any courses yet. Browse and purchase courses to see them here!"
                   : "No courses match your search criteria."
                 }
               </p>
+              {approvedCourses.length === 0 && (
+                <div className="mt-4">
+                  <button 
+                    onClick={onClose} 
+                    className="bg-gradient-to-r from-cyan-600 to-purple-600 text-white px-6 py-3 rounded-lg font-bold hover:from-cyan-700 hover:to-purple-700 transition-all duration-200 font-mono"
+                  >
+                    Browse Courses
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div>
@@ -727,7 +895,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose }) => {
                           }`}>
                             {course.has_access 
                               ? '🚀 Click to Access Course Content' 
-                              : '⏳ Admin will approve your purchase soon'
+                              : '⏳ Your purchase is being reviewed by admin'
                             }
                           </span>
                         </div>
