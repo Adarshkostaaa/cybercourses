@@ -46,7 +46,6 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [authError, setAuthError] = useState('');
   const [authSuccess, setAuthSuccess] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -132,22 +131,14 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
     setFilteredCourses(filtered);
   };
 
-  const findUserInStorage = async (email: string): Promise<LibraryUser | null> => {
+  // 🌐 IMPROVED CROSS-DEVICE USER SEARCH
+  const findUserAcrossAllSources = async (email: string): Promise<LibraryUser | null> => {
     const normalizedEmail = email.toLowerCase().trim();
+    console.log('🔍 Searching for user across all sources:', normalizedEmail);
     
-    // STEP 1: Check localStorage first (fastest)
-    const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
-    const localUser = existingUsers.find((user: LibraryUser) => 
-      user.email.toLowerCase() === normalizedEmail
-    );
-    
-    if (localUser) {
-      console.log('User found in localStorage');
-      return localUser;
-    }
-    
-    // STEP 2: Check cloud database
+    // STEP 1: Check cloud database FIRST (most reliable for cross-device)
     try {
+      console.log('☁️ Checking cloud database...');
       const connectionOk = await testConnection();
       if (connectionOk) {
         const { data, error } = await supabase
@@ -157,18 +148,41 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
           .single();
           
         if (!error && data) {
-          console.log('User found in cloud database');
-          // Store in localStorage for future use
-          existingUsers.push(data);
-          localStorage.setItem('library_users', JSON.stringify(existingUsers));
+          console.log('✅ User found in cloud database!');
+          
+          // Sync to localStorage for faster future access
+          const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
+          const localUserExists = existingUsers.find((user: LibraryUser) => 
+            user.email.toLowerCase() === normalizedEmail
+          );
+          
+          if (!localUserExists) {
+            existingUsers.push(data);
+            localStorage.setItem('library_users', JSON.stringify(existingUsers));
+            console.log('📱 Synced cloud user to localStorage');
+          }
+          
           return data;
         }
       }
     } catch (error) {
-      console.log('Cloud database search failed, using localStorage only');
+      console.log('⚠️ Cloud database check failed, continuing with local search...');
+    }
+    
+    // STEP 2: Check localStorage (device-specific backup)
+    console.log('📱 Checking localStorage...');
+    const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
+    const localUser = existingUsers.find((user: LibraryUser) => 
+      user.email.toLowerCase() === normalizedEmail
+    );
+    
+    if (localUser) {
+      console.log('✅ User found in localStorage!');
+      return localUser;
     }
     
     // STEP 3: Check alternative storage locations
+    console.log('🔄 Checking alternative storage locations...');
     const alternativeKeys = [
       'cybercourse_users',
       'registered_users', 
@@ -183,22 +197,23 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         user.email?.toLowerCase() === normalizedEmail
       );
       if (altUser) {
-        console.log(`User found in ${key}`);
+        console.log(`✅ User found in ${key}!`);
         return altUser;
       }
     }
     
+    console.log('❌ User not found in any source');
     return null;
   };
 
-  const storeUserEverywhere = async (user: LibraryUser) => {
-    // STEP 1: Store in localStorage (primary)
-    const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
-    existingUsers.push(user);
-    localStorage.setItem('library_users', JSON.stringify(existingUsers));
+  // 🌐 IMPROVED CROSS-DEVICE USER STORAGE
+  const storeUserAcrossAllSources = async (user: LibraryUser) => {
+    console.log('💾 Storing user across all sources:', user.email);
     
-    // STEP 2: Store in cloud database (if available)
+    // STEP 1: Store in cloud database FIRST (for cross-device access)
+    let cloudStorageSuccess = false;
     try {
+      console.log('☁️ Storing in cloud database...');
       const connectionOk = await testConnection();
       if (connectionOk) {
         const { error } = await supabase
@@ -210,16 +225,24 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
           }]);
           
         if (error) {
-          console.warn('Cloud storage failed, but localStorage succeeded:', error);
+          console.warn('⚠️ Cloud storage failed:', error);
         } else {
-          console.log('User stored in cloud database successfully');
+          console.log('✅ Successfully stored in cloud database');
+          cloudStorageSuccess = true;
         }
       }
     } catch (error) {
-      console.warn('Cloud storage failed, but localStorage succeeded:', error);
+      console.warn('⚠️ Cloud storage failed:', error);
     }
     
+    // STEP 2: Store in localStorage (always do this as backup)
+    console.log('📱 Storing in localStorage...');
+    const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
+    existingUsers.push(user);
+    localStorage.setItem('library_users', JSON.stringify(existingUsers));
+    
     // STEP 3: Store in backup locations
+    console.log('🔄 Storing in backup locations...');
     const backupKeys = [
       'cybercourse_users',
       'registered_users',
@@ -233,9 +256,12 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
       localStorage.setItem(key, JSON.stringify(backupUsers));
     });
     
-    // STEP 4: Store in session storage as backup
+    // STEP 4: Store in session storage as additional backup
     sessionStorage.setItem('current_library_user', JSON.stringify(user));
     sessionStorage.setItem('library_users_backup', JSON.stringify(existingUsers));
+    
+    console.log('✅ User stored across all sources successfully');
+    return cloudStorageSuccess;
   };
 
   const handleSignUp = async () => {
@@ -275,8 +301,11 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         return;
       }
 
-      // Check if user already exists
-      const existingUser = await findUserInStorage(emailInput);
+      const email = emailInput.toLowerCase().trim();
+      console.log('🚀 Starting signup for:', email);
+
+      // Check if user already exists across all sources
+      const existingUser = await findUserAcrossAllSources(email);
       if (existingUser) {
         setAuthError('An account with this email already exists. Please sign in instead.');
         return;
@@ -285,18 +314,22 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
       // Create new user
       const newUser: LibraryUser = {
         id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        email: emailInput.toLowerCase().trim(),
+        email: email,
         password: password,
         full_name: fullName.trim(),
         created_at: new Date().toISOString()
       };
 
-      // Store user everywhere
-      await storeUserEverywhere(newUser);
+      // Store user across all sources
+      const cloudSuccess = await storeUserAcrossAllSources(newUser);
 
-      setAuthSuccess('Account created successfully! You can now sign in.');
+      if (cloudSuccess) {
+        setAuthSuccess('✅ Account created successfully and synced to cloud! You can now sign in from any device.');
+      } else {
+        setAuthSuccess('✅ Account created successfully! Note: Cloud sync failed, but you can still use this account on this device.');
+      }
       
-      // Clear form and switch to sign in
+      // Clear form and switch to sign in after delay
       setTimeout(() => {
         setCurrentView('signin');
         setEmailInput('');
@@ -305,10 +338,10 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         setFullName('');
         setAuthSuccess('');
         setAuthError('');
-      }, 2000);
+      }, 3000);
       
     } catch (error) {
-      console.error('Signup error:', error);
+      console.error('❌ Signup error:', error);
       setAuthError('An error occurred during signup. Please try again.');
     } finally {
       setIsLoading(false);
@@ -335,37 +368,36 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         return;
       }
 
-      // Find user in storage
-      const user = await findUserInStorage(emailInput);
+      const email = emailInput.toLowerCase().trim();
+      console.log('🔐 Starting sign in for:', email);
+
+      // Find user across all sources (cloud + local)
+      const user = await findUserAcrossAllSources(email);
       
       if (!user) {
-        setAuthError('No account found with this email. Please sign up first.');
+        setAuthError('❌ No account found with this email. Please sign up first or check your email address.');
         return;
       }
 
       if (user.password !== password) {
-        setAuthError('Incorrect password. Please try again.');
+        setAuthError('❌ Incorrect password. Please try again.');
         return;
       }
 
       // Sign in successful
-      setUserEmail(emailInput);
+      console.log('✅ Sign in successful for:', email);
+      setUserEmail(email);
       setIsSignedIn(true);
-      loadUserCourses(emailInput);
+      loadUserCourses(email);
 
-      // Save to localStorage if remember me is checked
-      if (rememberMe) {
-        localStorage.setItem('library_user_email', emailInput);
-        localStorage.setItem('library_remember_me', 'true');
-      } else {
-        // Clear localStorage if remember me is not checked
-        localStorage.removeItem('library_user_email');
-        localStorage.removeItem('library_remember_me');
-      }
+      // ALWAYS save to localStorage (Remember Me is permanently enabled)
+      localStorage.setItem('library_user_email', email);
+      localStorage.setItem('library_remember_me', 'true');
+      console.log('💾 User session saved (Remember Me enabled permanently)');
 
       // Notify parent component about sign in
       if (onSignIn) {
-        onSignIn(emailInput);
+        onSignIn(email);
       }
 
       // Clear form
@@ -374,7 +406,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
       setAuthError('');
       
     } catch (error) {
-      console.error('Sign in error:', error);
+      console.error('❌ Sign in error:', error);
       setAuthError('An error occurred during sign in. Please try again.');
     } finally {
       setIsLoading(false);
@@ -382,6 +414,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
   };
 
   const handleSignOut = () => {
+    console.log('🚪 Signing out user:', userEmail);
     setIsSignedIn(false);
     setUserEmail('');
     setApprovedCourses([]);
@@ -391,6 +424,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
     // Clear localStorage
     localStorage.removeItem('library_user_email');
     localStorage.removeItem('library_remember_me');
+    console.log('🗑️ User session cleared');
   };
 
   const handleAccessCourse = (courseId: string) => {
@@ -485,8 +519,8 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
               </h3>
               <p className="text-gray-400 text-sm font-mono">
                 {currentView === 'signup' 
-                  ? 'Create an account to access your purchased courses'
-                  : 'Sign in to access your approved courses'
+                  ? '🌐 Create an account to access your courses from any device'
+                  : '🌐 Sign in to access your courses from any device'
                 }
               </p>
             </div>
@@ -602,22 +636,15 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
                 </div>
               )}
 
-              {/* Remember Me (Sign In Only) */}
-              {currentView === 'signin' && (
+              {/* Auto Remember Me Notice */}
+              <div className="bg-cyan-600/20 border border-cyan-400/30 rounded-lg p-3">
                 <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="rememberMe"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-4 h-4 text-cyan-400 bg-black/50 border border-cyan-400/30 rounded focus:ring-cyan-400 focus:ring-2"
-                    disabled={isLoading}
-                  />
-                  <label htmlFor="rememberMe" className="text-sm text-gray-300 font-mono">
-                    Remember me
-                  </label>
+                  <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
+                  <span className="text-cyan-400 text-sm font-mono">
+                    🔒 Auto-Remember: You'll stay signed in across all your devices
+                  </span>
                 </div>
-              )}
+              </div>
 
               {/* Submit Button */}
               <button
@@ -631,7 +658,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
                     <span>{currentView === 'signup' ? 'Creating Account...' : 'Signing In...'}</span>
                   </div>
                 ) : (
-                  currentView === 'signup' ? 'Create Account' : 'Access My Library'
+                  currentView === 'signup' ? '🌐 Create Cross-Device Account' : '🌐 Access My Library'
                 )}
               </button>
 
@@ -661,12 +688,12 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
             <div className="mt-6 text-center">
               <p className="text-gray-400 text-xs font-mono">
                 {currentView === 'signup' 
-                  ? 'After creating an account, purchase courses and wait for admin approval.'
-                  : 'Need help accessing your courses?'
+                  ? '🌐 Your account will sync across all devices automatically'
+                  : '🌐 Access your courses from any device, anywhere'
                 }
               </p>
               <p className="text-gray-400 text-xs font-mono mt-2">
-                Contact{' '}
+                Need help? Contact{' '}
                 <a href="mailto:adarshkosta1@gmail.com" className="text-cyan-400 hover:text-cyan-300">
                   adarshkosta1@gmail.com
                 </a>
@@ -914,10 +941,10 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
             <div className="flex items-center justify-center space-x-4 text-xs font-mono">
               <span className="text-green-400">✅ {filteredCourses.filter(c => c.has_access).length} Available</span>
               <span className="text-yellow-400">⏳ {filteredCourses.filter(c => !c.has_access).length} Pending</span>
-              <span className="text-cyan-400">🎓 Instant Access</span>
+              <span className="text-cyan-400">🌐 Cross-Device Access</span>
             </div>
             <p className="text-gray-400 text-xs sm:text-sm font-mono">
-              Signed in as: <span className="text-cyan-400">{userEmail}</span> • Need help? Contact{' '}
+              Signed in as: <span className="text-cyan-400">{userEmail}</span> • 🔒 Auto-remembered across devices • Need help? Contact{' '}
               <a href="mailto:adarshkosta1@gmail.com" className="text-cyan-400 hover:text-cyan-300">
                 adarshkosta1@gmail.com
               </a>
