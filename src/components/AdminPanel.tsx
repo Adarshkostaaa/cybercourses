@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, testConnection } from '../lib/supabase';
 import { Eye, CheckCircle, X, Search, Filter, Users, DollarSign, Clock, TrendingUp } from 'lucide-react';
 
 interface Purchase {
@@ -30,15 +30,47 @@ const AdminPanel: React.FC = () => {
 
   const fetchPurchases = async () => {
     try {
+      // Test connection first
+      const connectionTest = await testConnection();
+      if (!connectionTest) {
+        console.log('⚠️ Database connection failed, using localStorage fallback');
+        const localPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
+        setPurchases(localPurchases);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('purchases')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setPurchases(data || []);
+      if (error) {
+        console.error('Database error:', error);
+        // Fallback to localStorage if database query fails
+        const localPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
+        setPurchases(localPurchases);
+        return;
+      }
+      
+      // Merge database data with localStorage data
+      const localPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
+      const allPurchases = [...(data || []), ...localPurchases];
+      
+      // Remove duplicates based on ID
+      const uniquePurchases = allPurchases.reduce((acc: Purchase[], current: Purchase) => {
+        const existingIndex = acc.findIndex(p => p.id === current.id);
+        if (existingIndex === -1) {
+          acc.push(current);
+        }
+        return acc;
+      }, []);
+      
+      setPurchases(uniquePurchases);
     } catch (error) {
       console.error('Error fetching purchases:', error);
+      // Final fallback to localStorage
+      const localPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
+      setPurchases(localPurchases);
     } finally {
       setLoading(false);
     }
@@ -47,15 +79,31 @@ const AdminPanel: React.FC = () => {
   const handleApprove = async (purchaseId: string) => {
     setUpdating(purchaseId);
     try {
-      const { error } = await supabase
-        .from('purchases')
-        .update({ 
-          payment_status: 'approved',
-          approved_at: new Date().toISOString()
-        })
-        .eq('id', purchaseId);
+      // Try database update first
+      const connectionTest = await testConnection();
+      if (connectionTest) {
+        const { error } = await supabase
+          .from('purchases')
+          .update({ 
+            payment_status: 'approved',
+            approved_at: new Date().toISOString()
+          })
+          .eq('id', purchaseId);
 
-      if (error) throw error;
+        if (error) {
+          console.error('Database update failed, using localStorage:', error);
+        }
+      }
+      
+      // Always update localStorage as well
+      const localPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
+      const updatedPurchases = localPurchases.map((purchase: Purchase) => 
+        purchase.id === purchaseId 
+          ? { ...purchase, payment_status: 'approved' as const, approved_at: new Date().toISOString() }
+          : purchase
+      );
+      localStorage.setItem('admin_purchases', JSON.stringify(updatedPurchases));
+      
       await fetchPurchases();
     } catch (error) {
       console.error('Error approving purchase:', error);
@@ -67,12 +115,28 @@ const AdminPanel: React.FC = () => {
   const handleReject = async (purchaseId: string) => {
     setUpdating(purchaseId);
     try {
-      const { error } = await supabase
-        .from('purchases')
-        .update({ payment_status: 'rejected' })
-        .eq('id', purchaseId);
+      // Try database update first
+      const connectionTest = await testConnection();
+      if (connectionTest) {
+        const { error } = await supabase
+          .from('purchases')
+          .update({ payment_status: 'rejected' })
+          .eq('id', purchaseId);
 
-      if (error) throw error;
+        if (error) {
+          console.error('Database update failed, using localStorage:', error);
+        }
+      }
+      
+      // Always update localStorage as well
+      const localPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
+      const updatedPurchases = localPurchases.map((purchase: Purchase) => 
+        purchase.id === purchaseId 
+          ? { ...purchase, payment_status: 'rejected' as const }
+          : purchase
+      );
+      localStorage.setItem('admin_purchases', JSON.stringify(updatedPurchases));
+      
       await fetchPurchases();
     } catch (error) {
       console.error('Error rejecting purchase:', error);
