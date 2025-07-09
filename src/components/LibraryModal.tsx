@@ -136,48 +136,79 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
     const normalizedEmail = email.toLowerCase().trim();
     console.log('🔍 Searching for user across all sources:', normalizedEmail);
     
-    // STEP 1: Check cloud database FIRST (most reliable for cross-device)
-    try {
-      console.log('☁️ Checking cloud database...');
-      const connectionOk = await testConnection();
-      if (connectionOk) {
-        const { data, error } = await supabase
-          .from('library_users')
-          .select('*')
-          .eq('email', normalizedEmail)
-          .single();
+    // STEP 1: Check cloud database FIRST (most reliable for cross-device) with retry
+    let cloudAttempts = 0;
+    const maxCloudAttempts = 3;
+    
+    while (cloudAttempts < maxCloudAttempts) {
+      cloudAttempts++;
+      console.log(`☁️ Cloud database attempt ${cloudAttempts}/${maxCloudAttempts}...`);
+      
+      try {
+        const connectionOk = await testConnection();
+        console.log('🔗 Connection test result:', connectionOk);
+        
+        if (connectionOk) {
+          console.log('📡 Querying cloud database for user...');
           
-        if (!error && data) {
-          console.log('✅ User found in cloud database!');
-          
-          // Sync to localStorage for faster future access
-          const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
-          const localUserExists = existingUsers.find((user: LibraryUser) => 
-            user.email.toLowerCase() === normalizedEmail
-          );
-          
-          if (!localUserExists) {
-            existingUsers.push(data);
-            localStorage.setItem('library_users', JSON.stringify(existingUsers));
-            console.log('📱 Synced cloud user to localStorage');
+          const { data, error } = await supabase
+            .from('library_users')
+            .select('*')
+            .eq('email', normalizedEmail)
+            .single();
+            
+          console.log('📊 Cloud query result:', { data, error });
+            
+          if (!error && data) {
+            console.log('✅ User found in cloud database!', data);
+            
+            // Sync to localStorage for faster future access
+            const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
+            const localUserExists = existingUsers.find((user: LibraryUser) => 
+              user.email.toLowerCase() === normalizedEmail
+            );
+            
+            if (!localUserExists) {
+              existingUsers.push(data);
+              localStorage.setItem('library_users', JSON.stringify(existingUsers));
+              console.log('📱 Synced cloud user to localStorage');
+            }
+            
+            return data;
+          } else if (error) {
+            console.log('⚠️ Cloud query error:', error.message);
+            if (error.message.includes('No rows found')) {
+              console.log('👤 User not found in cloud database');
+              break; // User doesn't exist, no need to retry
+            }
           }
-          
-          return data;
+        } else {
+          console.log('❌ Cloud connection failed');
         }
+      } catch (error) {
+        console.log(`⚠️ Cloud database attempt ${cloudAttempts} failed:`, error);
       }
-    } catch (error) {
-      console.log('⚠️ Cloud database check failed, continuing with local search...');
+      
+      // Wait before retry (except on last attempt)
+      if (cloudAttempts < maxCloudAttempts) {
+        console.log('⏳ Waiting 1 second before retry...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
+    
+    console.log('☁️ All cloud attempts exhausted, checking local storage...');
     
     // STEP 2: Check localStorage (device-specific backup)
     console.log('📱 Checking localStorage...');
     const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
+    console.log('📱 LocalStorage users found:', existingUsers.length);
+    
     const localUser = existingUsers.find((user: LibraryUser) => 
       user.email.toLowerCase() === normalizedEmail
     );
     
     if (localUser) {
-      console.log('✅ User found in localStorage!');
+      console.log('✅ User found in localStorage!', localUser);
       return localUser;
     }
     
@@ -193,11 +224,12 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
     
     for (const key of alternativeKeys) {
       const altUsers = JSON.parse(localStorage.getItem(key) || '[]');
+      console.log(`🔍 Checking ${key}: ${altUsers.length} users found`);
       const altUser = altUsers.find((user: any) => 
         user.email?.toLowerCase() === normalizedEmail
       );
       if (altUser) {
-        console.log(`✅ User found in ${key}!`);
+        console.log(`✅ User found in ${key}!`, altUser);
         return altUser;
       }
     }
@@ -210,35 +242,77 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
   const storeUserAcrossAllSources = async (user: LibraryUser) => {
     console.log('💾 Storing user across all sources:', user.email);
     
-    // STEP 1: Store in cloud database FIRST (for cross-device access)
+    // STEP 1: Store in cloud database FIRST (for cross-device access) with retry
     let cloudStorageSuccess = false;
-    try {
-      console.log('☁️ Storing in cloud database...');
-      const connectionOk = await testConnection();
-      if (connectionOk) {
-        const { error } = await supabase
-          .from('library_users')
-          .insert([{
-            email: user.email,
-            password: user.password,
-            full_name: user.full_name
-          }]);
+    let cloudAttempts = 0;
+    const maxCloudAttempts = 3;
+    
+    while (cloudAttempts < maxCloudAttempts && !cloudStorageSuccess) {
+      cloudAttempts++;
+      console.log(`☁️ Cloud storage attempt ${cloudAttempts}/${maxCloudAttempts}...`);
+      
+      try {
+        const connectionOk = await testConnection();
+        console.log('🔗 Connection test result:', connectionOk);
+        
+        if (connectionOk) {
+          console.log('📡 Inserting user into cloud database...');
           
-        if (error) {
-          console.warn('⚠️ Cloud storage failed:', error);
+          const { data, error } = await supabase
+            .from('library_users')
+            .insert([{
+              email: user.email,
+              password: user.password,
+              full_name: user.full_name
+            }])
+            .select()
+            .single();
+            
+          console.log('📊 Cloud insert result:', { data, error });
+            
+          if (error) {
+            console.warn(`⚠️ Cloud storage attempt ${cloudAttempts} failed:`, error);
+            if (error.message.includes('duplicate key')) {
+              console.log('👤 User already exists in cloud database');
+              cloudStorageSuccess = true; // Consider this a success
+              break;
+            }
+          } else {
+            console.log('✅ Successfully stored in cloud database', data);
+            cloudStorageSuccess = true;
+            break;
+          }
         } else {
-          console.log('✅ Successfully stored in cloud database');
-          cloudStorageSuccess = true;
+          console.log('❌ Cloud connection failed');
         }
+      } catch (error) {
+        console.warn(`⚠️ Cloud storage attempt ${cloudAttempts} failed:`, error);
       }
-    } catch (error) {
-      console.warn('⚠️ Cloud storage failed:', error);
+      
+      // Wait before retry (except on last attempt)
+      if (cloudAttempts < maxCloudAttempts && !cloudStorageSuccess) {
+        console.log('⏳ Waiting 1 second before retry...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
     
     // STEP 2: Store in localStorage (always do this as backup)
     console.log('📱 Storing in localStorage...');
     const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
-    existingUsers.push(user);
+    
+    // Check if user already exists in localStorage
+    const existingIndex = existingUsers.findIndex((u: LibraryUser) => 
+      u.email.toLowerCase() === user.email.toLowerCase()
+    );
+    
+    if (existingIndex >= 0) {
+      existingUsers[existingIndex] = user; // Update existing
+      console.log('📱 Updated existing user in localStorage');
+    } else {
+      existingUsers.push(user); // Add new
+      console.log('📱 Added new user to localStorage');
+    }
+    
     localStorage.setItem('library_users', JSON.stringify(existingUsers));
     
     // STEP 3: Store in backup locations
@@ -252,7 +326,16 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
     
     backupKeys.forEach(key => {
       const backupUsers = JSON.parse(localStorage.getItem(key) || '[]');
-      backupUsers.push(user);
+      const existingBackupIndex = backupUsers.findIndex((u: any) => 
+        u.email?.toLowerCase() === user.email.toLowerCase()
+      );
+      
+      if (existingBackupIndex >= 0) {
+        backupUsers[existingBackupIndex] = user;
+      } else {
+        backupUsers.push(user);
+      }
+      
       localStorage.setItem(key, JSON.stringify(backupUsers));
     });
     
@@ -260,7 +343,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
     sessionStorage.setItem('current_library_user', JSON.stringify(user));
     sessionStorage.setItem('library_users_backup', JSON.stringify(existingUsers));
     
-    console.log('✅ User stored across all sources successfully');
+    console.log(`✅ User stored across all sources. Cloud success: ${cloudStorageSuccess}`);
     return cloudStorageSuccess;
   };
 
@@ -268,7 +351,6 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
     setAuthError('');
     setAuthSuccess('');
     setIsLoading(true);
-    
     try {
       // Validation
       if (!fullName.trim()) {
@@ -304,14 +386,20 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
       const email = emailInput.toLowerCase().trim();
       console.log('🚀 Starting signup for:', email);
 
+      // Show loading message
+      setAuthError('🔍 Checking if account already exists...');
+      
       // Check if user already exists across all sources
       const existingUser = await findUserAcrossAllSources(email);
       if (existingUser) {
-        setAuthError('An account with this email already exists. Please sign in instead.');
+        setAuthError('❌ An account with this email already exists. Please sign in instead.');
         return;
       }
 
-      // Create new user
+      // Show creating message
+      setAuthError('💾 Creating your account...');
+
+      // Create new user object
       const newUser: LibraryUser = {
         id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         email: email,
@@ -320,13 +408,16 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         created_at: new Date().toISOString()
       };
 
+      // Show storing message
+      setAuthError('☁️ Syncing to cloud database...');
+
       // Store user across all sources
       const cloudSuccess = await storeUserAcrossAllSources(newUser);
 
       if (cloudSuccess) {
-        setAuthSuccess('✅ Account created successfully and synced to cloud! You can now sign in from any device.');
+        setAuthSuccess('🎉 Account created and synced to cloud! You can now sign in from ANY device.');
       } else {
-        setAuthSuccess('✅ Account created successfully! Note: Cloud sync failed, but you can still use this account on this device.');
+        setAuthSuccess('⚠️ Account created locally! Cloud sync failed - you can use this account on this device, but may need to recreate on other devices.');
       }
       
       // Clear form and switch to sign in after delay
@@ -371,6 +462,9 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
       const email = emailInput.toLowerCase().trim();
       console.log('🔐 Starting sign in for:', email);
 
+      // Show searching message
+      setAuthError('🔍 Searching for your account across all devices...');
+
       // Find user across all sources (cloud + local)
       const user = await findUserAcrossAllSources(email);
       
@@ -379,10 +473,16 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         return;
       }
 
+      // Show password checking message
+      setAuthError('🔐 Verifying password...');
+
       if (user.password !== password) {
         setAuthError('❌ Incorrect password. Please try again.');
         return;
       }
+
+      // Clear error message
+      setAuthError('');
 
       // Sign in successful
       console.log('✅ Sign in successful for:', email);
