@@ -25,45 +25,37 @@ export const testConnection = async () => {
   try {
     console.log('🔗 Testing Supabase connection...');
     
-    // Test with a simple query and longer timeout for better reliability
+    // Test with a simple query and shorter timeout for faster fallback
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Connection timeout')), 5000)
+      setTimeout(() => reject(new Error('Connection timeout')), 3000)
     );
     
-    // Try to query library_users table first
+    // Try a simple health check query first
     let queryPromise = supabase
-      .from('library_users')
-      .select('id')
+      .from('purchases')
+      .select('count')
       .limit(1);
     
-    console.log('📡 Testing library_users table...');
+    console.log('📡 Testing database connection...');
     let result = await Promise.race([queryPromise, timeoutPromise]) as any;
-    let { data, error } = result;
+    let { error } = result;
     
     if (error) {
-      console.log('⚠️ library_users table test failed, trying purchases table:', error.message);
+      console.log('⚠️ Database connection test failed:', error.message);
       
-      // Try purchases table as fallback
-      queryPromise = supabase
-        .from('purchases')
-        .select('id')
-        .limit(1);
-        
-      console.log('📡 Testing purchases table...');
-      const fallbackResult = await Promise.race([queryPromise, timeoutPromise]) as any;
-      data = fallbackResult.data;
-      error = fallbackResult.error;
-      
-      if (error) {
-        console.error('❌ Both table tests failed:', error);
-        return false;
+      // Check if it's a table not found error
+      if (error.message && error.message.includes('relation') && error.message.includes('does not exist')) {
+        console.log('❌ Database tables do not exist. Please run the migration scripts in Supabase.');
+        console.log('📋 Check SUPABASE_SETUP_INSTRUCTIONS.md for setup instructions.');
       }
+      
+      return false;
     }
     
     console.log('✅ Supabase connection test successful');
     return true;
   } catch (error) {
-    console.log('❌ Supabase connection test failed (will use localStorage fallback):', error);
+    console.log('❌ Supabase connection test failed (using localStorage fallback):', error);
     return false;
   }
 };
