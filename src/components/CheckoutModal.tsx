@@ -38,7 +38,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, course, 
   const discountAmount = (totalOriginalPrice * discount) / 100;
   const finalPrice = totalOriginalPrice - discountAmount;
 
-  const upiId = "adarshkosta1@fam";
+  const upiId = "adarshkosta@fam";
 
   // Set user email from props when component mounts or userEmail changes
   useEffect(() => {
