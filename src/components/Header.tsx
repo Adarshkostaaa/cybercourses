@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Menu, X, Shield, ShoppingCart, BookOpen } from 'lucide-react';
+import { Search, Menu, X, ShoppingCart, BookOpen, GraduationCap, ChevronDown } from 'lucide-react';
 import { useCart } from '../contexts/CartContext';
 
 interface HeaderProps {
@@ -13,6 +13,7 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ onSearchChange, onCategoryChange, onAdminClick, onCartClick, onLibraryClick }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showCategories, setShowCategories] = useState(false);
   const { getCartCount } = useCart();
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -22,116 +23,114 @@ const Header: React.FC<HeaderProps> = ({ onSearchChange, onCategoryChange, onAdm
   };
 
   const categories = [
-    'All', 'Cybersecurity', 'Video Editing', 'Programming', 
+    'All', 'Cybersecurity', 'Video Editing', 'Programming',
     'Digital Marketing', 'Web Development', 'Design', 'Data Science', 'Business'
   ];
 
   const cartCount = getCartCount();
 
   return (
-    <header className="bg-black/90 backdrop-blur-md border-b border-cyan-400/30 text-white sticky top-0 z-50">
+    <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
+      {/* Top announcement bar */}
+      <div className="bg-gradient-to-r from-primary-600 to-purple-600 text-white text-center py-2 px-4 text-sm font-medium">
+        🔥 <span className="font-semibold">Flash Sale!</span> Get up to <span className="font-bold">80% OFF</span> on all courses — Limited time only!
+      </div>
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-14 sm:h-16 lg:h-20">
+        <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <div className="flex items-center space-x-2 flex-shrink-0">
-            <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-cyan-400 animate-pulse" />
-            <span className="text-lg sm:text-xl lg:text-2xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent font-mono">
-              CYBERCOURSE
+          <div className="flex items-center space-x-2 flex-shrink-0 cursor-pointer" onClick={() => onCategoryChange('All')}>
+            <div className="bg-primary-600 rounded-lg p-1.5">
+              <GraduationCap className="h-6 w-6 text-white" />
+            </div>
+            <span className="text-xl font-bold font-heading text-gray-900">
+              Cyber<span className="text-primary-600">Course</span>
             </span>
           </div>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden lg:flex items-center space-x-6 xl:space-x-8 flex-1 justify-center">
-            <button 
-              onClick={() => onCategoryChange('All')}
-              className="hover:text-cyan-400 transition-colors duration-200 font-mono text-white text-sm xl:text-base"
+          {/* Categories Dropdown */}
+          <div className="hidden lg:flex relative ml-6">
+            <button
+              onClick={() => setShowCategories(!showCategories)}
+              onBlur={() => setTimeout(() => setShowCategories(false), 200)}
+              className="flex items-center space-x-1 text-sm font-medium text-gray-700 hover:text-primary-600 transition-colors px-3 py-2 rounded-lg hover:bg-gray-50"
             >
-              Home
+              <span>Categories</span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${showCategories ? 'rotate-180' : ''}`} />
             </button>
-            <button 
-              onClick={() => onCategoryChange('Cybersecurity')}
-              className="hover:text-cyan-400 transition-colors duration-200 font-mono text-white text-sm xl:text-base"
-            >
-              Courses
-            </button>
-            {onLibraryClick && (
-              <button 
-                onClick={onLibraryClick}
-                className="hover:text-cyan-400 transition-colors duration-200 font-mono text-white text-sm xl:text-base"
-              >
-                My Library
-              </button>
+            {showCategories && (
+              <div className="absolute top-full left-0 mt-1 bg-white rounded-xl shadow-card-hover border border-gray-100 py-2 w-56 z-50">
+                {categories.filter(c => c !== 'All').map((category) => (
+                  <button
+                    key={category}
+                    onClick={() => {
+                      onCategoryChange(category);
+                      setShowCategories(false);
+                    }}
+                    className="block w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-600 transition-colors"
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
             )}
-            {onAdminClick && (
-              <button 
-                onClick={onAdminClick}
-                className="hover:text-cyan-400 transition-colors duration-200 font-mono text-white text-sm xl:text-base"
-              >
-                Admin
-              </button>
-            )}
-          </nav>
+          </div>
 
-          {/* Search Bar - Hidden on mobile */}
-          <div className="hidden md:flex items-center space-x-3 lg:space-x-4 flex-1 max-w-xs lg:max-w-md mx-4">
+          {/* Search Bar */}
+          <div className="hidden md:flex items-center flex-1 max-w-xl mx-6">
             <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search courses..."
+                placeholder="Search for courses, topics, or skills..."
                 value={searchTerm}
                 onChange={handleSearchChange}
-                className="w-full pl-10 pr-4 py-2 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:bg-black/70 transition-all duration-200 text-white placeholder-gray-400 font-mono text-sm"
+                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-full focus:outline-none focus:border-primary-500 focus:bg-white focus:ring-2 focus:ring-primary-100 transition-all text-sm text-gray-900 placeholder-gray-400"
               />
             </div>
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center space-x-2 sm:space-x-3 lg:space-x-4 flex-shrink-0">
-            {/* Library Button */}
+          <div className="flex items-center space-x-1 sm:space-x-2 flex-shrink-0">
             {onLibraryClick && (
               <button
                 onClick={onLibraryClick}
-                className="hidden sm:flex items-center space-x-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 px-3 py-2 sm:px-4 sm:py-2 rounded-lg font-medium transition-all duration-200 font-mono text-xs sm:text-sm"
-                title="My Library"
+                className="flex items-center space-x-1.5 text-sm font-medium text-gray-700 hover:text-primary-600 px-2 sm:px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 <BookOpen className="h-4 w-4" />
-                <span className="hidden lg:inline">My Library</span>
+                <span className="hidden sm:inline">My Library</span>
               </button>
             )}
 
-            {/* Cart Button */}
             {onCartClick && (
               <button
                 onClick={onCartClick}
-                className="relative p-2 hover:bg-cyan-800/30 rounded-lg transition-colors duration-200"
+                className="relative p-2 hover:bg-gray-50 rounded-lg transition-colors"
                 title="Shopping Cart"
               >
-                <ShoppingCart className="h-5 w-5 sm:h-6 sm:w-6" />
+                <ShoppingCart className="h-5 w-5 text-gray-700" />
                 {cartCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-mono">
+                  <span className="absolute -top-0.5 -right-0.5 bg-primary-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-semibold">
                     {cartCount > 9 ? '9+' : cartCount}
                   </span>
                 )}
               </button>
             )}
 
-            {/* Admin Button */}
             {onAdminClick && (
               <button
                 onClick={onAdminClick}
-                className="hidden sm:block bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-700 hover:to-purple-700 px-3 py-2 sm:px-4 sm:py-2 rounded-lg font-medium transition-all duration-200 font-mono text-xs sm:text-sm"
+                className="hidden sm:block text-sm font-medium text-gray-600 hover:text-primary-600 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Admin
               </button>
             )}
 
-            {/* Mobile Menu Button */}
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="lg:hidden p-2 rounded-lg hover:bg-cyan-800/30 transition-colors duration-200"
+              className="lg:hidden p-2 rounded-lg hover:bg-gray-50 transition-colors"
             >
-              {isMenuOpen ? <X className="h-5 w-5 sm:h-6 sm:w-6" /> : <Menu className="h-5 w-5 sm:h-6 sm:w-6" />}
+              {isMenuOpen ? <X className="h-5 w-5 text-gray-700" /> : <Menu className="h-5 w-5 text-gray-700" />}
             </button>
           </div>
         </div>
@@ -139,58 +138,39 @@ const Header: React.FC<HeaderProps> = ({ onSearchChange, onCategoryChange, onAdm
         {/* Mobile Search */}
         <div className="md:hidden pb-3">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
               type="text"
               placeholder="Search courses..."
               value={searchTerm}
               onChange={handleSearchChange}
-              className="w-full pl-10 pr-4 py-2 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:bg-black/70 transition-all duration-200 text-white placeholder-gray-400 font-mono text-sm"
+              className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-full focus:outline-none focus:border-primary-500 focus:bg-white transition-all text-sm text-gray-900 placeholder-gray-400"
             />
           </div>
         </div>
 
         {/* Mobile Menu */}
         {isMenuOpen && (
-          <div className="lg:hidden pb-4 space-y-2">
-            <button 
-              onClick={() => {
-                onCategoryChange('All');
-                setIsMenuOpen(false);
-              }}
-              className="block w-full text-left px-4 py-2 hover:bg-cyan-800/30 rounded-lg transition-colors duration-200 font-mono text-sm"
-            >
+          <div className="lg:hidden pb-4 border-t border-gray-100 pt-3 space-y-1 animate-fade-in">
+            <button onClick={() => { onCategoryChange('All'); setIsMenuOpen(false); }}
+              className="block w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded-lg transition-colors">
               Home
             </button>
-            <button 
-              onClick={() => {
-                onCategoryChange('Cybersecurity');
-                setIsMenuOpen(false);
-              }}
-              className="block w-full text-left px-4 py-2 hover:bg-cyan-800/30 rounded-lg transition-colors duration-200 font-mono text-sm"
-            >
-              Courses
-            </button>
+            {categories.filter(c => c !== 'All').map(category => (
+              <button key={category} onClick={() => { onCategoryChange(category); setIsMenuOpen(false); }}
+                className="block w-full text-left px-4 py-2.5 text-sm text-gray-600 hover:bg-primary-50 hover:text-primary-600 rounded-lg transition-colors">
+                {category}
+              </button>
+            ))}
             {onLibraryClick && (
-              <button 
-                onClick={() => {
-                  onLibraryClick();
-                  setIsMenuOpen(false);
-                }}
-                className="flex items-center space-x-2 w-full text-left px-4 py-2 hover:bg-cyan-800/30 rounded-lg transition-colors duration-200 font-mono text-sm"
-              >
-                <BookOpen className="h-4 w-4" />
-                <span>My Library</span>
+              <button onClick={() => { onLibraryClick(); setIsMenuOpen(false); }}
+                className="flex items-center space-x-2 w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded-lg transition-colors">
+                <BookOpen className="h-4 w-4" /><span>My Library</span>
               </button>
             )}
             {onAdminClick && (
-              <button 
-                onClick={() => {
-                  onAdminClick();
-                  setIsMenuOpen(false);
-                }}
-                className="block w-full text-left px-4 py-2 hover:bg-cyan-800/30 rounded-lg transition-colors duration-200 font-mono text-sm"
-              >
+              <button onClick={() => { onAdminClick(); setIsMenuOpen(false); }}
+                className="block w-full text-left px-4 py-2.5 text-sm text-gray-600 hover:bg-primary-50 hover:text-primary-600 rounded-lg transition-colors">
                 Admin
               </button>
             )}
@@ -198,18 +178,20 @@ const Header: React.FC<HeaderProps> = ({ onSearchChange, onCategoryChange, onAdm
         )}
       </div>
 
-      {/* Category Pills - Mobile Optimized */}
-      <div className="border-t border-cyan-400/20 px-4 sm:px-6 lg:px-8 py-2 sm:py-3 bg-black/30">
-        <div className="flex space-x-2 overflow-x-auto pb-2 sm:pb-0">
-          {categories.map((category) => (
-            <button
-              key={category}
-              onClick={() => onCategoryChange(category)}
-              className="whitespace-nowrap px-2 py-1 sm:px-3 sm:py-1 bg-black/50 hover:bg-cyan-700/30 border border-cyan-400/20 hover:border-cyan-400 rounded-full text-xs sm:text-sm font-medium transition-all duration-200 hover:scale-105 font-mono"
-            >
-              {category}
-            </button>
-          ))}
+      {/* Category Pills */}
+      <div className="hidden lg:block border-t border-gray-100 bg-gray-50/50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex space-x-1 py-2 overflow-x-auto">
+            {categories.map((category) => (
+              <button
+                key={category}
+                onClick={() => onCategoryChange(category)}
+                className="whitespace-nowrap px-4 py-1.5 text-sm font-medium text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-full transition-all"
+              >
+                {category}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </header>

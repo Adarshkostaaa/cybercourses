@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Copy, CheckCircle, Clock, QrCode, CreditCard, Smartphone, Building, User, Mail, Phone } from 'lucide-react';
+import { X, Copy, CheckCircle, QrCode, CreditCard, Smartphone, Building, User, Phone, Lock, Shield, Star } from 'lucide-react';
 import { Course } from '../types';
 import { supabase, testConnection } from '../lib/supabase';
 
@@ -17,42 +17,26 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, course, 
   const [showPaymentWaiting, setShowPaymentWaiting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('upi');
-  
-  // User details form
-  const [userDetails, setUserDetails] = useState({
-    fullName: '',
-    phone: ''
-  });
+  const [userDetails, setUserDetails] = useState({ fullName: '', phone: '' });
 
-  // Handle both single course and multiple courses
   const coursesToCheckout = courses || (course ? [course] : []);
   const totalOriginalPrice = coursesToCheckout.reduce((sum, c) => sum + c.price, 0);
 
-  const validCoupons = {
-    'GET20': 20,
-    'FREE20': 20,
-    'SAVE30': 30
-  };
+  const validCoupons: Record<string, number> = { 'GET20': 20, 'FREE20': 20, 'SAVE30': 30 };
 
-  const discount = appliedCoupon ? validCoupons[appliedCoupon as keyof typeof validCoupons] || 0 : 0;
+  const discount = appliedCoupon ? validCoupons[appliedCoupon] || 0 : 0;
   const discountAmount = (totalOriginalPrice * discount) / 100;
   const finalPrice = totalOriginalPrice - discountAmount;
 
   const upiId = "adarshkosta@fam";
 
-  // Set user email from props when component mounts or userEmail changes
   useEffect(() => {
-    if (userEmail) {
-      setUserDetails(prev => ({ ...prev }));
-    }
+    if (userEmail) setUserDetails(prev => ({ ...prev }));
   }, [userEmail]);
 
   const handleApplyCoupon = () => {
-    if (validCoupons[couponCode as keyof typeof validCoupons]) {
-      setAppliedCoupon(couponCode);
-    } else {
-      alert('Invalid coupon code');
-    }
+    if (validCoupons[couponCode]) setAppliedCoupon(couponCode);
+    else alert('Invalid coupon code');
   };
 
   const handleCopyUPI = () => {
@@ -62,194 +46,142 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, course, 
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setUserDetails(prev => ({
-      ...prev,
-      [e.target.name]: e.target.value
-    }));
+    setUserDetails(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
   const handleConfirmPayment = () => {
-    // Validate user details
     if (!userDetails.fullName.trim() || !userEmail?.trim() || !userDetails.phone.trim()) {
       alert('Please fill in all your details');
       return;
     }
-
     if (!userEmail?.includes('@')) {
       alert('Invalid user email. Please sign in again.');
       return;
     }
-
-    // Create purchase records for all courses
-    coursesToCheckout.forEach(courseItem => {
-      createPurchaseRecord(courseItem);
-    });
-    
+    coursesToCheckout.forEach(courseItem => createPurchaseRecord(courseItem));
     setShowPaymentWaiting(true);
   };
 
   const createPurchaseRecord = async (courseItem: Course) => {
     try {
-      console.log('Attempting to create purchase record for course:', courseItem.title);
-      
-      // Create purchase data
       const purchaseAmount = coursesToCheckout.length === 1 ? finalPrice : Math.round((courseItem.price / totalOriginalPrice) * finalPrice);
-      
-      // Get the user's registered email from library users if they're signed in
       const savedEmail = localStorage.getItem('library_user_email');
       const finalUserEmail = savedEmail || userEmail?.trim() || '';
-      
-      // Always store locally first (guaranteed to work)
+
       const localPurchase = {
         id: `local_${Date.now()}_${courseItem.id}_${Math.random().toString(36).substr(2, 9)}`,
-        user_id: null,
-        course_id: courseItem.id,
-        payment_status: 'pending',
-        amount_paid: purchaseAmount,
-        coupon_used: appliedCoupon || null,
-        user_email: finalUserEmail,
-        user_phone: userDetails.phone.trim(),
-        user_name: userDetails.fullName.trim(),
-        course_title: courseItem.title,
-        course_price: purchaseAmount,
-        created_at: new Date().toISOString()
+        user_id: null, course_id: courseItem.id, payment_status: 'pending',
+        amount_paid: purchaseAmount, coupon_used: appliedCoupon || null,
+        user_email: finalUserEmail, user_phone: userDetails.phone.trim(),
+        user_name: userDetails.fullName.trim(), course_title: courseItem.title,
+        course_price: purchaseAmount, created_at: new Date().toISOString()
       };
-      
-      // Store for admin processing (always works)
+
       const existingPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
       existingPurchases.push(localPurchase);
       localStorage.setItem('admin_purchases', JSON.stringify(existingPurchases));
-      
-      // Also store in recent purchases for immediate library access
+
       const recentPurchases = JSON.parse(localStorage.getItem('recent_purchases') || '[]');
-      // Check if this purchase already exists to avoid duplicates
-      const existingRecent = recentPurchases.find((p: any) => 
-        p.course_id === localPurchase.course_id && 
-        p.user_email.toLowerCase() === localPurchase.user_email.toLowerCase()
+      const existingRecent = recentPurchases.find((p: any) =>
+        p.course_id === localPurchase.course_id && p.user_email.toLowerCase() === localPurchase.user_email.toLowerCase()
       );
-      
-      if (!existingRecent) {
-        recentPurchases.push(localPurchase);
-      }
+      if (!existingRecent) recentPurchases.push(localPurchase);
       localStorage.setItem('recent_purchases', JSON.stringify(recentPurchases));
-      
-      console.log('Purchase stored locally for admin processing');
-      
-      // Try to store in database as backup (don't block if it fails)
+
       try {
         const connectionOk = await testConnection();
         if (connectionOk) {
           const purchaseData = {
-            user_id: null,
-            course_id: courseItem.id,
-            payment_status: 'pending' as const,
-            amount_paid: purchaseAmount,
-            coupon_used: appliedCoupon || null,
-            user_email: finalUserEmail,
-            user_phone: userDetails.phone.trim(),
-            user_name: userDetails.fullName.trim(),
-            course_title: courseItem.title,
+            user_id: null, course_id: courseItem.id, payment_status: 'pending' as const,
+            amount_paid: purchaseAmount, coupon_used: appliedCoupon || null,
+            user_email: finalUserEmail, user_phone: userDetails.phone.trim(),
+            user_name: userDetails.fullName.trim(), course_title: courseItem.title,
             course_price: purchaseAmount
           };
-
-          const { error } = await supabase
-            .from('purchases')
-            .insert([purchaseData]);
-
-          if (error) {
-            console.warn('Database insert failed, but local storage succeeded:', error);
-          } else {
-            console.log('Purchase also stored in database successfully');
-          }
-        } else {
-          console.warn('Database connection failed, using local storage only');
+          await supabase.from('purchases').insert([purchaseData]);
         }
-      } catch (dbError) {
-        console.warn('Database operation failed, but local storage succeeded:', dbError);
-      }
-      
-    } catch (error) {
-      console.error('Error in createPurchaseRecord:', error);
-      // This shouldn't happen since we're using localStorage, but just in case
-      console.warn('Unexpected error, but purchase should still be recorded locally');
-    }
+      } catch (dbError) { console.warn('Database operation failed, using local storage:', dbError); }
+    } catch (error) { console.error('Error in createPurchaseRecord:', error); }
   };
 
   if (!isOpen) return null;
 
   if (showPaymentWaiting) {
     return (
-      <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div className="bg-black/90 border border-cyan-400/30 rounded-xl max-w-md w-full p-6 sm:p-8 text-center backdrop-blur-md">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-3xl max-w-md w-full p-8 text-center shadow-2xl animate-fade-in-up">
           <div className="mb-6">
-            <div className="bg-green-600/20 border border-green-400/30 rounded-full w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 flex items-center justify-center">
-              <CheckCircle className="h-8 w-8 sm:h-10 sm:w-10 text-green-400 animate-pulse" />
+            <div className="relative mx-auto w-24 h-24 mb-5">
+              <div className="absolute inset-0 bg-green-200 rounded-full animate-breathe"></div>
+              <div className="relative bg-gradient-to-br from-green-400 to-emerald-500 rounded-full w-24 h-24 flex items-center justify-center shadow-lg">
+                <CheckCircle className="h-12 w-12 text-white" />
+              </div>
             </div>
-            <h3 className="text-lg sm:text-xl font-bold text-white mb-2 font-mono">Payment Confirmation Received!</h3>
-            <p className="text-gray-300 mb-4 font-mono text-sm sm:text-base">
-              Your payment confirmation has been received. Course access will be granted within 20-30 minutes.
+            <h3 className="text-2xl font-bold text-gray-900 mb-3 font-heading">Payment Confirmed! 🎉</h3>
+            <p className="text-gray-600 mb-5 text-sm leading-relaxed">
+              Your payment has been received successfully. Course access will be granted within 20-30 minutes.
             </p>
-            <div className="bg-green-600/20 border border-green-400/30 rounded-lg p-3 sm:p-4 mb-4">
-              <p className="text-green-200 text-xs sm:text-sm font-medium font-mono">
-                ✓ Course link will be sent to {userEmail} once payment is verified.
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 mb-5">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <CheckCircle className="h-5 w-5 text-green-500" />
+                <p className="text-green-700 text-sm font-bold">Order Submitted Successfully</p>
+              </div>
+              <p className="text-green-600 text-xs">
+                Course link will be sent to <strong>{userEmail}</strong> once payment is verified.
+              </p>
+            </div>
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-2">
+              <p className="text-blue-700 text-xs font-medium">
+                📧 Check your email (including spam folder) within 30 minutes
               </p>
             </div>
           </div>
-          
-          <div className="space-y-3">
-            <button
-              onClick={onClose}
-              className="w-full bg-gradient-to-r from-cyan-600 to-purple-600 text-white py-2 sm:py-3 px-4 rounded-lg font-medium hover:from-cyan-700 hover:to-purple-700 transition-all duration-200 font-mono border border-cyan-400/30 hover:border-cyan-400 text-sm sm:text-base"
-            >
-              Continue Shopping
-            </button>
-            <p className="text-xs sm:text-sm text-gray-400 font-mono">
-              Need help? Contact us at <a href="mailto:adarshkosta1@gmail.com" className="text-cyan-400 hover:text-cyan-300">adarshkosta1@gmail.com</a>
-            </p>
-          </div>
+          <button onClick={onClose} className="w-full bg-gradient-to-r from-primary-600 to-purple-600 text-white py-3.5 rounded-xl font-bold text-base hover:from-primary-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl transform hover:scale-[1.02]">
+            Continue Exploring Courses
+          </button>
+          <p className="text-xs text-gray-400 mt-4">
+            Need help? <a href="mailto:adarshkosta1@gmail.com" className="text-primary-600 hover:underline font-medium">adarshkosta1@gmail.com</a>
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-black/90 border border-cyan-400/30 rounded-xl max-w-4xl w-full max-h-[95vh] overflow-y-auto backdrop-blur-md">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-end sm:items-center justify-center z-50 sm:p-4">
+      <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full sm:max-w-4xl max-h-[95vh] sm:max-h-[95vh] overflow-y-auto shadow-2xl scroll-smooth-ios">
         {/* Header */}
-        <div className="p-4 sm:p-6 border-b border-cyan-400/20 bg-gradient-to-r from-cyan-900/20 to-purple-900/20">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl sm:text-2xl font-bold text-white font-mono">Complete Your Purchase</h2>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-cyan-800/30 rounded-full transition-colors duration-200"
-            >
-              <X className="h-5 w-5 sm:h-6 sm:w-6 text-gray-300" />
-            </button>
+        <div className="p-4 sm:p-6 border-b border-gray-100 bg-gradient-to-r from-white to-gray-50 flex items-center justify-between rounded-t-3xl sticky top-0 z-10">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 font-heading">Complete Your Purchase</h2>
+            <div className="flex items-center space-x-2 mt-1">
+              <Lock className="h-3.5 w-3.5 text-green-500" />
+              <span className="text-xs text-green-600 font-medium">Secure Checkout</span>
+              <Shield className="h-3.5 w-3.5 text-blue-500 ml-2" />
+              <span className="text-xs text-blue-600 font-medium">SSL Protected</span>
+            </div>
           </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
         </div>
 
         <div className="p-4 sm:p-6">
-          <div className="grid lg:grid-cols-2 gap-6">
-            {/* Left Column - Course Details & User Info */}
+          <div className="grid lg:grid-cols-2 gap-6 sm:gap-8">
+            {/* Left — Order & User Info */}
             <div>
-              <h3 className="text-lg font-semibold text-white mb-4 font-mono">Order Summary</h3>
-              
-              {/* Course List */}
+              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Order Summary</h3>
               <div className="space-y-3 mb-6">
-                {coursesToCheckout.map((courseItem, index) => (
-                  <div key={courseItem.id} className="bg-black/50 border border-cyan-400/20 rounded-lg p-3 sm:p-4">
-                    <div className="flex items-start space-x-3">
-                      <img 
-                        src={courseItem.image_url}
-                        alt={courseItem.title}
-                        className="w-16 h-12 sm:w-20 sm:h-16 object-cover rounded-lg flex-shrink-0"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-white font-mono text-sm sm:text-base line-clamp-2">{courseItem.title}</h4>
-                        <p className="text-xs sm:text-sm text-gray-400 font-mono">{courseItem.category} • {courseItem.level}</p>
-                        <div className="flex items-center justify-between mt-2">
-                          <span className="text-cyan-400 font-bold text-sm sm:text-base font-mono">₹{courseItem.price}</span>
-                          <span className="text-xs text-gray-500 font-mono">{courseItem.duration}</span>
+                {coursesToCheckout.map((courseItem) => (
+                  <div key={courseItem.id} className="flex items-start space-x-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                    <img src={courseItem.image_url} alt={courseItem.title} className="w-16 h-12 object-cover rounded-lg flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-medium text-gray-900 text-sm line-clamp-2">{courseItem.title}</h4>
+                      <p className="text-xs text-gray-500">{courseItem.category} • {courseItem.level}</p>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-primary-600 font-bold text-sm">₹{courseItem.price}</span>
+                        <div className="flex items-center space-x-0.5">
+                          {[...Array(5)].map((_, i) => <Star key={i} className="h-3 w-3 text-yellow-400 fill-current" />)}
                         </div>
                       </div>
                     </div>
@@ -257,224 +189,172 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, course, 
                 ))}
               </div>
 
-              {/* User Details Form */}
-              <div className="mb-6">
-                <h3 className="text-lg font-semibold text-white mb-4 font-mono">Your Details</h3>
-                
-                {/* Show signed in email */}
-                <div className="mb-4 p-3 bg-green-600/20 border border-green-400/30 rounded-lg">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                    <span className="text-green-400 font-mono text-sm">Signed in as: {userEmail}</span>
+              {/* User Details */}
+              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Your Details</h3>
+              {userEmail && (
+                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center space-x-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span className="text-sm text-green-700">Signed in as: <strong>{userEmail}</strong></span>
+                </div>
+              )}
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name *</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input type="text" name="fullName" value={userDetails.fullName} onChange={handleInputChange}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 text-sm text-gray-900 placeholder-gray-400"
+                      placeholder="Your full name" required />
                   </div>
                 </div>
-                
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2 font-mono">
-                      Full Name *
-                    </label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
-                      <input
-                        type="text"
-                        name="fullName"
-                        value={userDetails.fullName}
-                        onChange={handleInputChange}
-                        className="w-full pl-10 pr-4 py-2 sm:py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 transition-all duration-200 font-mono text-sm sm:text-base"
-                        placeholder="John Doe"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2 font-mono">
-                      Phone Number *
-                    </label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
-                      <input
-                        type="tel"
-                        name="phone"
-                        value={userDetails.phone}
-                        onChange={handleInputChange}
-                        className="w-full pl-10 pr-4 py-2 sm:py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 transition-all duration-200 font-mono text-sm sm:text-base"
-                        placeholder="+91 9876543210"
-                        required
-                      />
-                    </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone Number *</label>
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input type="tel" name="phone" value={userDetails.phone} onChange={handleInputChange}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 text-sm text-gray-900 placeholder-gray-400"
+                      placeholder="+91 9876543210" required />
                   </div>
                 </div>
               </div>
 
-              {/* Coupon Code */}
+              {/* Coupon */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-300 mb-2 font-mono">
-                  Coupon Code
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Coupon Code</label>
                 <div className="flex space-x-2">
-                  <input
-                    type="text"
-                    value={couponCode}
-                    onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                    placeholder="Enter GET20, FREE20, or SAVE30"
-                    className="flex-1 px-3 py-2 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 transition-all duration-200 font-mono text-sm"
-                  />
-                  <button
-                    onClick={handleApplyCoupon}
-                    className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-purple-600 text-white rounded-lg hover:from-cyan-700 hover:to-purple-700 transition-all duration-200 font-mono border border-cyan-400/30 hover:border-cyan-400 text-sm"
-                  >
+                  <input type="text" value={couponCode} onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                    placeholder="Enter coupon code"
+                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:border-primary-500 text-sm placeholder-gray-400" />
+                  <button onClick={handleApplyCoupon} className="px-5 py-2.5 bg-primary-600 text-white rounded-xl text-sm font-semibold hover:bg-primary-700 transition-colors">
                     Apply
                   </button>
                 </div>
-                {appliedCoupon && (
-                  <p className="text-green-400 text-sm mt-1 font-mono">
-                    ✓ {appliedCoupon} applied - {discount}% off
-                  </p>
-                )}
+                {appliedCoupon && <p className="text-green-600 text-sm mt-1 font-medium">✓ {appliedCoupon} applied — {discount}% off</p>}
               </div>
 
               {/* Price Summary */}
-              <div className="bg-black/50 border border-cyan-400/20 rounded-lg p-4">
-                <h4 className="font-medium text-white mb-3 font-mono">Price Summary</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-gray-400 font-mono text-sm">Subtotal ({coursesToCheckout.length} {coursesToCheckout.length === 1 ? 'course' : 'courses'})</span>
-                    <span className="font-medium text-white font-mono text-sm">₹{totalOriginalPrice}</span>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                <h4 className="font-semibold text-gray-900 text-sm mb-3">Price Summary</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between text-gray-600">
+                    <span>Subtotal ({coursesToCheckout.length} {coursesToCheckout.length === 1 ? 'course' : 'courses'})</span>
+                    <span className="font-medium text-gray-900">₹{totalOriginalPrice}</span>
                   </div>
                   {discount > 0 && (
-                    <div className="flex justify-between text-green-400 font-mono text-sm">
+                    <div className="flex justify-between text-green-600">
                       <span>Discount ({discount}%)</span>
                       <span>-₹{discountAmount}</span>
                     </div>
                   )}
-                  <div className="border-t border-cyan-400/20 pt-2">
-                    <div className="flex justify-between text-lg font-bold text-white font-mono">
-                      <span>Total</span>
-                      <span className="text-cyan-400">₹{finalPrice}</span>
-                    </div>
+                  <div className="border-t border-gray-200 pt-2 flex justify-between font-bold text-gray-900">
+                    <span>Total</span>
+                    <span className="text-primary-600 text-lg">₹{finalPrice}</span>
                   </div>
                 </div>
+              </div>
+
+              {/* Guarantee reminder */}
+              <div className="mt-4 flex items-center space-x-2 text-xs text-gray-500">
+                <Shield className="h-4 w-4 text-green-500" />
+                <span>7-day money-back guarantee • Instant access after payment verification</span>
               </div>
             </div>
 
-            {/* Right Column - Payment */}
+            {/* Right — Payment */}
             <div>
-              <h3 className="text-lg font-semibold text-white mb-4 font-mono">Payment Method</h3>
-              
-              {/* Payment Method Selection */}
+              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Payment Method</h3>
               <div className="space-y-3 mb-6">
-                <div 
-                  className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 ${
-                    selectedPaymentMethod === 'upi' 
-                      ? 'border-cyan-400 bg-cyan-400/10' 
-                      : 'border-gray-600 bg-black/30'
-                  }`}
-                  onClick={() => setSelectedPaymentMethod('upi')}
-                >
+                <div onClick={() => setSelectedPaymentMethod('upi')}
+                  className={`p-4 border rounded-xl cursor-pointer transition-all ${selectedPaymentMethod === 'upi' ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-100' : 'border-gray-200 hover:border-gray-300'}`}>
                   <div className="flex items-center space-x-3">
-                    <Smartphone className="h-5 w-5 text-cyan-400" />
-                    <div>
-                      <h4 className="font-medium text-white font-mono">UPI Payment</h4>
-                      <p className="text-sm text-gray-400 font-mono">Pay using any UPI app</p>
-                    </div>
+                    <Smartphone className="h-5 w-5 text-primary-600" />
+                    <div><h4 className="font-medium text-gray-900 text-sm">UPI Payment</h4><p className="text-xs text-gray-500">Pay using any UPI app</p></div>
+                    {selectedPaymentMethod === 'upi' && <CheckCircle className="h-5 w-5 text-primary-600 ml-auto" />}
                   </div>
                 </div>
-                
-                <div 
-                  className={`p-4 border rounded-lg cursor-not-allowed opacity-50 ${
-                    selectedPaymentMethod === 'card' 
-                      ? 'border-cyan-400 bg-cyan-400/10' 
-                      : 'border-gray-600 bg-black/30'
-                  }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <CreditCard className="h-5 w-5 text-gray-400" />
-                    <div>
-                      <h4 className="font-medium text-gray-400 font-mono">Credit/Debit Card</h4>
-                      <p className="text-sm text-gray-500 font-mono">Coming Soon</p>
+                {[{ icon: CreditCard, title: 'Credit/Debit Card', sub: 'Coming Soon' }, { icon: Building, title: 'Net Banking', sub: 'Coming Soon' }].map((m, i) => (
+                  <div key={i} className="p-4 border border-gray-200 rounded-xl opacity-50 cursor-not-allowed">
+                    <div className="flex items-center space-x-3">
+                      <m.icon className="h-5 w-5 text-gray-400" />
+                      <div><h4 className="font-medium text-gray-400 text-sm">{m.title}</h4><p className="text-xs text-gray-400">{m.sub}</p></div>
                     </div>
                   </div>
-                </div>
-                
-                <div 
-                  className={`p-4 border rounded-lg cursor-not-allowed opacity-50 ${
-                    selectedPaymentMethod === 'netbanking' 
-                      ? 'border-cyan-400 bg-cyan-400/10' 
-                      : 'border-gray-600 bg-black/30'
-                  }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <Building className="h-5 w-5 text-gray-400" />
-                    <div>
-                      <h4 className="font-medium text-gray-400 font-mono">Net Banking</h4>
-                      <p className="text-sm text-gray-500 font-mono">Coming Soon</p>
-                    </div>
-                  </div>
-                </div>
+                ))}
               </div>
 
-              {/* UPI Payment Details */}
+              {/* UPI Details */}
               {selectedPaymentMethod === 'upi' && (
-                <div className="bg-black/50 border border-cyan-400/20 rounded-lg p-4 text-center mb-6">
-                  <div className="flex items-center justify-center mb-3">
-                    <QrCode className="h-6 w-6 sm:h-8 sm:w-8 text-cyan-400 mr-2" />
-                    <h4 className="font-medium text-white font-mono text-sm sm:text-base">Scan QR Code to Pay ₹{finalPrice}</h4>
+                <div className="bg-gradient-to-br from-gray-50 to-blue-50 border border-gray-200 rounded-2xl p-6 text-center mb-6">
+                  <div className="flex items-center justify-center space-x-2 mb-4">
+                    <div className="bg-primary-100 p-2 rounded-lg">
+                      <QrCode className="h-5 w-5 text-primary-600" />
+                    </div>
+                    <h4 className="font-bold text-gray-900 text-base">Scan to Pay ₹{finalPrice}</h4>
                   </div>
-                  
-                  <div className="mb-3 mx-auto w-fit">
+                  <div className="mb-4 mx-auto w-fit bg-white p-3 rounded-2xl shadow-lg border border-gray-100">
                     <img 
-                      src="/qr.png"
-                      alt="UPI Payment QR Code"
-                      className="w-40 h-40 sm:w-56 sm:h-56 object-cover rounded-lg"
+                      src="/qr.png" 
+                      alt="UPI QR Code" 
+                      className="w-48 h-48 object-contain rounded-lg"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        // Try SVG fallback
+                        if (target.src.includes('.png')) {
+                          target.src = '/qr-code.svg';
+                        } else if (target.src.includes('-code.svg')) {
+                          target.src = '/qr-placeholder.svg';
+                        }
+                      }}
                     />
                   </div>
-                  
-                  <p className="text-sm text-gray-400 mb-2 font-mono">Or use UPI ID directly:</p>
-                  <div className="flex items-center justify-center space-x-2">
-                    <code className="bg-black/50 px-3 py-1 rounded text-sm text-cyan-400 border border-cyan-400/30 font-mono">{upiId}</code>
-                    <button
-                      onClick={handleCopyUPI}
-                      className="p-1 hover:bg-cyan-700/30 rounded transition-colors duration-200"
-                      title="Copy UPI ID"
-                    >
-                      {copied ? <CheckCircle className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4 text-gray-300" />}
-                    </button>
+                  <div className="bg-white rounded-xl border border-gray-200 p-3 mb-3">
+                    <p className="text-xs text-gray-500 mb-2 font-medium">Or pay using UPI ID:</p>
+                    <div className="flex items-center justify-center space-x-2">
+                      <code className="bg-primary-50 px-4 py-2 rounded-lg text-sm text-primary-700 border border-primary-200 font-bold tracking-wide">{upiId}</code>
+                      <button onClick={handleCopyUPI} className="p-2 hover:bg-gray-100 rounded-lg transition-all active:scale-95">
+                        {copied ? <CheckCircle className="h-5 w-5 text-green-500" /> : <Copy className="h-5 w-5 text-gray-400" />}
+                      </button>
+                    </div>
+                    {copied && <p className="text-green-600 text-xs mt-1 font-medium animate-fade-in">✓ UPI ID copied!</p>}
                   </div>
+                  <p className="text-xs text-gray-400">Supports Google Pay, PhonePe, Paytm & all UPI apps</p>
                 </div>
               )}
 
-              {/* Payment Instructions */}
-              <div className="bg-cyan-600/20 border border-cyan-400/30 rounded-lg p-4 mb-6">
-                <h4 className="font-medium text-cyan-200 mb-3 font-mono text-sm sm:text-base">Quick Payment Steps</h4>
-                <div className="text-xs sm:text-sm text-cyan-100 space-y-2 font-mono">
-                  <div className="flex items-center space-x-2">
-                    <span className="bg-cyan-400 text-black rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
-                    <span>Pay ₹{finalPrice} using QR code or UPI ID</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="bg-cyan-400 text-black rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
-                    <span>Click "Confirm Payment" after completing payment</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="bg-cyan-400 text-black rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
-                    <span>Get course link at {userEmail} within 20-30 minutes</span>
-                  </div>
+              {/* Steps */}
+              <div className="bg-gradient-to-r from-primary-50 to-indigo-50 border border-primary-100 rounded-xl p-5 mb-6">
+                <h4 className="font-bold text-primary-900 text-sm mb-3 flex items-center gap-2">
+                  <Smartphone className="h-4 w-4" /> Quick Payment Steps
+                </h4>
+                <div className="space-y-3">
+                  {[
+                    `Pay ₹${finalPrice} using QR code or UPI ID`,
+                    'Click "Confirm Payment" after completing payment',
+                    `Get course link at ${userEmail} within 20-30 minutes`
+                  ].map((step, i) => (
+                    <div key={i} className="flex items-center space-x-3 text-sm text-primary-800">
+                      <span className="bg-gradient-to-br from-primary-600 to-purple-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold flex-shrink-0 shadow-sm">{i + 1}</span>
+                      <span className="font-medium">{step}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              {/* Confirm Payment Button */}
-              <button
-                onClick={handleConfirmPayment}
+              {/* Confirm */}
+              <button onClick={handleConfirmPayment}
                 disabled={selectedPaymentMethod !== 'upi' || !userDetails.fullName || !userEmail || !userDetails.phone}
-                className="w-full bg-gradient-to-r from-green-600 to-cyan-600 text-white py-3 px-4 rounded-lg font-medium hover:from-green-700 hover:to-cyan-700 transition-all duration-200 transform hover:scale-105 font-mono border border-green-400/30 hover:border-green-400 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none text-sm sm:text-base"
-              >
-                ✓ Confirm Payment Completed
+                className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-4 rounded-xl font-bold text-base hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 transform hover:scale-[1.02] active:scale-[0.98]">
+                <CheckCircle className="h-5 w-5" />
+                <span>Confirm Payment Completed</span>
               </button>
-              
-              <p className="text-xs text-gray-400 text-center mt-2 font-mono">
-                Need help? Contact us at <a href="mailto:adarshkosta1@gmail.com" className="text-cyan-400 hover:text-cyan-300">adarshkosta1@gmail.com</a>
+
+              <div className="mt-3 flex items-center justify-center space-x-4 text-xs text-gray-400">
+                <div className="flex items-center space-x-1"><Lock className="h-3 w-3" /><span>Secure</span></div>
+                <div className="flex items-center space-x-1"><Shield className="h-3 w-3" /><span>Encrypted</span></div>
+              </div>
+
+              <p className="text-xs text-gray-400 text-center mt-3">
+                Need help? <a href="mailto:adarshkosta1@gmail.com" className="text-primary-600 hover:underline">adarshkosta1@gmail.com</a>
               </p>
             </div>
           </div>

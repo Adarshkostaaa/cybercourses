@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, BookOpen, Play, Clock, Star, Search, ExternalLink, Mail, User, Eye, EyeOff, LogOut, UserPlus, Lock, ArrowLeft } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, BookOpen, Play, Clock, Star, Search, ExternalLink, Mail, Eye, EyeOff, LogOut, UserPlus, Lock, ArrowLeft, User, Shield, CheckCircle, Sparkles } from 'lucide-react';
 import { supabase, testConnection } from '../lib/supabase';
 
 interface LibraryEntry {
@@ -20,6 +20,7 @@ interface LibraryUser {
   email: string;
   password: string;
   full_name: string;
+  username?: string;
   created_at: string;
 }
 
@@ -37,23 +38,54 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
   const [userEmail, setUserEmail] = useState('');
   const [currentView, setCurrentView] = useState<'signin' | 'signup'>('signin');
   
-  // Form states
   const [emailInput, setEmailInput] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [authError, setAuthError] = useState('');
   const [authSuccess, setAuthSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [passwordStrength, setPasswordStrength] = useState(0);
+
+  // Check username availability
+  useEffect(() => {
+    if (!username || username.length < 3) {
+      setUsernameAvailable(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setCheckingUsername(true);
+      const normalizedUsername = username.toLowerCase().trim();
+      const allUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
+      const registeredUsers = JSON.parse(localStorage.getItem('registered_users_list') || '[]');
+      const taken = allUsers.some((u: any) => u.username?.toLowerCase() === normalizedUsername) ||
+        registeredUsers.some((u: any) => u.username?.toLowerCase() === normalizedUsername);
+      setUsernameAvailable(!taken);
+      setCheckingUsername(false);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [username]);
+
+  // Password strength checker
+  useEffect(() => {
+    let strength = 0;
+    if (password.length >= 6) strength++;
+    if (password.length >= 8) strength++;
+    if (/[A-Z]/.test(password)) strength++;
+    if (/[0-9]/.test(password)) strength++;
+    if (/[^A-Za-z0-9]/.test(password)) strength++;
+    setPasswordStrength(strength);
+  }, [password]);
 
   useEffect(() => {
     if (isOpen) {
-      // Check if user is already signed in (from localStorage)
       const savedEmail = localStorage.getItem('library_user_email');
       const savedRemember = localStorage.getItem('library_remember_me');
-      
       if (savedEmail && savedRemember === 'true') {
         setUserEmail(savedEmail);
         setIsSignedIn(true);
@@ -67,20 +99,11 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
   }, [approvedCourses, searchTerm]);
 
   const loadUserCourses = (email: string) => {
-    // Load all courses for specific user email from admin purchases
     const adminPurchases = JSON.parse(localStorage.getItem('admin_purchases') || '[]');
-    
-    // Also check recent purchases from checkout
     const recentPurchases = JSON.parse(localStorage.getItem('recent_purchases') || '[]');
-    
-    // Combine all purchases
     const allPurchases = [...adminPurchases, ...recentPurchases];
-    
-    // Filter courses for this specific user email
     const userCourses = allPurchases
-      .filter((purchase: any) => 
-        purchase.user_email.toLowerCase() === email.toLowerCase()
-      )
+      .filter((purchase: any) => purchase.user_email.toLowerCase() === email.toLowerCase())
       .map((purchase: any) => ({
         id: `approved_${purchase.id}`,
         purchase_id: purchase.id,
@@ -93,434 +116,208 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         status: purchase.payment_status || 'pending',
         has_access: purchase.payment_status === 'approved'
       }));
-    
-    // Remove duplicates - keep only the latest status for each course
     const uniqueCourses = userCourses.reduce((acc: any[], current: any) => {
-      const existingIndex = acc.findIndex(course => 
-        course.course_id === current.course_id && 
-        course.user_email === current.user_email
+      const existingIndex = acc.findIndex((course: any) => 
+        course.course_id === current.course_id && course.user_email === current.user_email
       );
-      
       if (existingIndex >= 0) {
         const existing = acc[existingIndex];
-        // Keep the approved one if one is approved, otherwise keep the most recent
-        if (current.status === 'approved' || 
-            (existing.status !== 'approved' && new Date(current.approved_at) > new Date(existing.approved_at))) {
+        if (current.status === 'approved' || (existing.status !== 'approved' && new Date(current.approved_at) > new Date(existing.approved_at))) {
           acc[existingIndex] = current;
         }
       } else {
         acc.push(current);
       }
-      
       return acc;
     }, []);
-    
     setApprovedCourses(uniqueCourses);
   };
 
   const filterCourses = () => {
     let filtered = approvedCourses;
-
-    // Filter by search term
     if (searchTerm.trim()) {
-      filtered = filtered.filter(course => 
-        course.course_title.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+      filtered = filtered.filter(course => course.course_title.toLowerCase().includes(searchTerm.toLowerCase()));
     }
-
     setFilteredCourses(filtered);
   };
 
-  // 🌐 IMPROVED CROSS-DEVICE USER SEARCH
   const findUserAcrossAllSources = async (email: string): Promise<LibraryUser | null> => {
     const normalizedEmail = email.toLowerCase().trim();
-    console.log('🔍 Searching for user across all sources:', normalizedEmail);
-    
-    // STEP 1: Quick localStorage check first (fastest)
-    console.log('📱 Quick localStorage check...');
     const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
-    const localUser = existingUsers.find((user: LibraryUser) => 
-      user.email.toLowerCase() === normalizedEmail
-    );
-    
-    if (localUser) {
-      console.log('✅ User found in localStorage (quick check)!', localUser);
-      return localUser;
-    }
-    
-    // STEP 2: Try cloud database with timeout protection and table existence check
-    console.log('☁️ Attempting cloud database search...');
-    
+    const localUser = existingUsers.find((user: LibraryUser) => user.email.toLowerCase() === normalizedEmail);
+    if (localUser) return localUser;
     try {
-      // Test connection first
       const connectionTest = await testConnection();
-      if (!connectionTest) {
-        console.log('⚠️ Database connection failed, skipping cloud search');
-        throw new Error('Database connection failed');
-      }
-      
-      // Create a promise that will timeout after 3 seconds
-      const timeoutPromise = new Promise<null>((_, reject) => 
-        setTimeout(() => reject(new Error('Cloud search timeout')), 3000)
-      );
-      
-      // Create the database query promise
+      if (!connectionTest) throw new Error('Connection failed');
+      const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
       const queryPromise = (async () => {
-        // Try direct query first
-        const { data, error } = await supabase
-          .from('library_users')
-          .select('*')
-          .eq('email', normalizedEmail)
-          .single();
-          
-        if (!error && data) {
-          return data;
-        }
-        
-        // If error is table not found, skip further attempts
-        if (error && error.message && error.message.includes('relation') && error.message.includes('does not exist')) {
-          console.log('⚠️ library_users table does not exist in database');
-          throw new Error('Table does not exist');
-        }
-        
-        // If single query fails, try select all approach
-        const allResult = await supabase
-          .from('library_users')
-          .select('*');
-          
+        const { data, error } = await supabase.from('library_users').select('*').eq('email', normalizedEmail).single();
+        if (!error && data) return data;
+        if (error?.message?.includes('relation') && error?.message?.includes('does not exist')) throw new Error('Table missing');
+        const allResult = await supabase.from('library_users').select('*');
         if (!allResult.error && allResult.data) {
-          const foundUser = allResult.data.find((user: any) => 
-            user.email.toLowerCase() === normalizedEmail
-          );
-          return foundUser || null;
+          return allResult.data.find((user: any) => user.email.toLowerCase() === normalizedEmail) || null;
         }
-        
         return null;
       })();
-      
-      // Race between query and timeout
       const cloudUser = await Promise.race([queryPromise, timeoutPromise]);
-      
       if (cloudUser) {
-        console.log('✅ User found in cloud database!', cloudUser);
-        
-        // Sync to localStorage for faster future access
         const updatedUsers = [...existingUsers, cloudUser];
         localStorage.setItem('library_users', JSON.stringify(updatedUsers));
-        console.log('📱 Synced cloud user to localStorage');
-        
         return cloudUser;
       }
-      
-    } catch (error) {
-      console.log('⚠️ Cloud database search failed or timed out:', error.message);
-      if (error.message && error.message.includes('relation') && error.message.includes('does not exist')) {
-        console.log('📋 Please run the database migration scripts. Check SUPABASE_SETUP_INSTRUCTIONS.md');
-      }
-    }
-    
-    // STEP 3: Comprehensive local storage search
-    console.log('🔄 Comprehensive local storage search...');
-    
-    // Check all alternative storage locations
-    const alternativeKeys = [
-      'library_users',
-      'cybercourse_users',
-      'registered_users', 
-      'user_accounts',
-      'library_accounts',
-      'course_users'
-    ];
-    
+    } catch { /* cloud search failed */ }
+    const alternativeKeys = ['cybercourse_users', 'registered_users', 'user_accounts', 'library_accounts'];
     for (const key of alternativeKeys) {
       const altUsers = JSON.parse(localStorage.getItem(key) || '[]');
-      console.log(`🔍 Checking ${key}: ${altUsers.length} users found`);
-      
-      const altUser = altUsers.find((user: any) => 
-        user.email?.toLowerCase() === normalizedEmail
-      );
-      
-      if (altUser) {
-        console.log(`✅ User found in ${key}!`, altUser);
-        return altUser;
-      }
+      const altUser = altUsers.find((user: any) => user.email?.toLowerCase() === normalizedEmail);
+      if (altUser) return altUser;
     }
-    
-    // STEP 4: Check session storage as final fallback
-    console.log('🔄 Checking session storage...');
     try {
       const sessionUser = sessionStorage.getItem('current_library_user');
       if (sessionUser) {
         const parsedUser = JSON.parse(sessionUser);
-        if (parsedUser.email?.toLowerCase() === normalizedEmail) {
-          console.log('✅ User found in session storage!', parsedUser);
-          return parsedUser;
-        }
+        if (parsedUser.email?.toLowerCase() === normalizedEmail) return parsedUser;
       }
-      
-      const sessionBackup = sessionStorage.getItem('library_users_backup');
-      if (sessionBackup) {
-        const backupUsers = JSON.parse(sessionBackup);
-        const sessionBackupUser = backupUsers.find((user: any) => 
-          user.email?.toLowerCase() === normalizedEmail
-        );
-        if (sessionBackupUser) {
-          console.log('✅ User found in session backup!', sessionBackupUser);
-          return sessionBackupUser;
-        }
-      }
-    } catch (error) {
-      console.log('⚠️ Session storage check failed:', error);
-    }
-    
-    console.log('❌ User not found in any source after comprehensive search');
+    } catch { /* session check failed */ }
     return null;
   };
 
-  // 🌐 IMPROVED CROSS-DEVICE USER STORAGE
   const storeUserAcrossAllSources = async (user: LibraryUser) => {
-    console.log('💾 Storing user across all sources:', user.email);
-    
-    // STEP 1: Store in localStorage FIRST (guaranteed to work)
-    console.log('📱 Storing in localStorage (primary)...');
     const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
-    
-    // Check if user already exists in localStorage
-    const existingIndex = existingUsers.findIndex((u: LibraryUser) => 
-      u.email.toLowerCase() === user.email.toLowerCase()
-    );
-    
-    if (existingIndex >= 0) {
-      existingUsers[existingIndex] = user; // Update existing
-      console.log('📱 Updated existing user in localStorage');
-    } else {
-      existingUsers.push(user); // Add new
-      console.log('📱 Added new user to localStorage');
-    }
-    
+    const existingIndex = existingUsers.findIndex((u: LibraryUser) => u.email.toLowerCase() === user.email.toLowerCase());
+    if (existingIndex >= 0) existingUsers[existingIndex] = user;
+    else existingUsers.push(user);
     localStorage.setItem('library_users', JSON.stringify(existingUsers));
-    console.log('✅ User stored in localStorage successfully');
-    
-    // STEP 2: Try cloud database (with timeout protection)
-    let cloudStorageSuccess = false;
-    console.log('☁️ Attempting cloud database storage...');
-    
-    try {
-      // Test connection first
-      const connectionTest = await testConnection();
-      if (!connectionTest) {
-        console.log('⚠️ Database connection failed, skipping cloud storage');
-        throw new Error('Database connection failed');
-      }
-      
-      // Create a promise that will timeout after 5 seconds
-      const timeoutPromise = new Promise<null>((_, reject) => 
-        setTimeout(() => reject(new Error('Cloud storage timeout')), 5000)
-      );
-      
-      // Create the database insert promise
-      const insertPromise = supabase
-        .from('library_users')
-        .insert([{
-          email: user.email,
-          password: user.password,
-          full_name: user.full_name
-        }])
-        .select()
-        .single();
-      
-      // Race between insert and timeout
-      const result = await Promise.race([insertPromise, timeoutPromise]);
-      
-      if (result && !result.error) {
-        console.log('✅ Successfully stored in cloud database', result.data);
-        cloudStorageSuccess = true;
-      } else if (result && result.error) {
-        if (result.error.message && result.error.message.includes('relation') && result.error.message.includes('does not exist')) {
-          console.log('⚠️ library_users table does not exist. Please run migration scripts.');
-          console.log('📋 Check SUPABASE_SETUP_INSTRUCTIONS.md for setup instructions.');
-        } else if (result.error.message && (
-          result.error.message.includes('duplicate key') || 
-          result.error.message.includes('already exists')
-        )) {
-          console.log('👤 User already exists in cloud database');
-          cloudStorageSuccess = true;
-        } else {
-          console.warn('⚠️ Cloud storage failed:', result.error);
-        }
-      }
-      
-    } catch (error) {
-      console.warn('⚠️ Cloud storage failed or timed out:', error.message);
-      if (error.message && error.message.includes('relation') && error.message.includes('does not exist')) {
-        console.log('📋 Please run the database migration scripts. Check SUPABASE_SETUP_INSTRUCTIONS.md');
-      } else if (error.message && (
-        error.message.includes('duplicate key') || 
-        error.message.includes('already exists')
-      )) {
-        console.log('👤 User already exists in cloud database (caught in exception)');
-        cloudStorageSuccess = true;
-      }
+
+    // Save to registered_users for admin panel tracking
+    const registeredUsers = JSON.parse(localStorage.getItem('registered_users_list') || '[]');
+    const regIndex = registeredUsers.findIndex((u: any) => u.email.toLowerCase() === user.email.toLowerCase());
+    if (regIndex < 0) {
+      registeredUsers.push({
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        created_at: user.created_at,
+        has_purchased: false,
+        last_active: new Date().toISOString()
+      });
+      localStorage.setItem('registered_users_list', JSON.stringify(registeredUsers));
     }
-    
-    // STEP 3: Store in backup locations
-    console.log('🔄 Storing in backup locations...');
-    const backupKeys = [
-      'cybercourse_users',
-      'registered_users',
-      'user_accounts',
-      'library_accounts'
-    ];
-    
+
+    try {
+      const connectionTest = await testConnection();
+      if (!connectionTest) throw new Error('No connection');
+      const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+      const insertPromise = supabase.from('library_users').insert([{ email: user.email, password: user.password, full_name: user.full_name }]).select().single();
+      await Promise.race([insertPromise, timeoutPromise]);
+    } catch { /* cloud storage failed */ }
+    const backupKeys = ['cybercourse_users', 'registered_users', 'user_accounts', 'library_accounts'];
     backupKeys.forEach(key => {
       const backupUsers = JSON.parse(localStorage.getItem(key) || '[]');
-      const existingBackupIndex = backupUsers.findIndex((u: any) => 
-        u.email?.toLowerCase() === user.email.toLowerCase()
-      );
-      
-      if (existingBackupIndex >= 0) {
-        backupUsers[existingBackupIndex] = user;
-      } else {
-        backupUsers.push(user);
-      }
-      
+      const bi = backupUsers.findIndex((u: any) => u.email?.toLowerCase() === user.email.toLowerCase());
+      if (bi >= 0) backupUsers[bi] = user;
+      else backupUsers.push(user);
       localStorage.setItem(key, JSON.stringify(backupUsers));
     });
-    
-    // STEP 4: Store in session storage as additional backup
     sessionStorage.setItem('current_library_user', JSON.stringify(user));
     sessionStorage.setItem('library_users_backup', JSON.stringify(existingUsers));
-    
-    console.log(`✅ User stored successfully! Local: ✅ Cloud: ${cloudStorageSuccess ? '✅' : '⚠️ (Check setup instructions)'}`);
-    return cloudStorageSuccess;
+  };
+
+  // Track user activity
+  const trackActivity = (action: string, details?: string) => {
+    const activities = JSON.parse(localStorage.getItem('user_activities') || '[]');
+    activities.push({
+      id: `act_${Date.now()}`,
+      user_email: emailInput.toLowerCase().trim() || userEmail,
+      action,
+      details: details || '',
+      timestamp: new Date().toISOString(),
+      page: 'library'
+    });
+    // Keep last 500 activities
+    if (activities.length > 500) activities.splice(0, activities.length - 500);
+    localStorage.setItem('user_activities', JSON.stringify(activities));
+  };
+
+  // Record referral when someone signs up via referral link
+  const recordReferral = (refCode: string, newUserEmail: string, newUserName: string) => {
+    // Find the referral data matching the code
+    const allKeys = Object.keys(localStorage);
+    const referralKeys = allKeys.filter(k => k.startsWith('referral_'));
+    for (const key of referralKeys) {
+      try {
+        const data = JSON.parse(localStorage.getItem(key) || '{}');
+        if (data.referralCode === refCode) {
+          // Check if this user was already referred
+          const alreadyReferred = data.referredUsers?.some((u: any) => u.email.toLowerCase() === newUserEmail.toLowerCase());
+          if (!alreadyReferred) {
+            data.referredUsers = data.referredUsers || [];
+            data.referredUsers.push({
+              email: newUserEmail,
+              name: newUserName,
+              signedUpAt: new Date().toISOString()
+            });
+            if (data.referredUsers.length >= 5) {
+              data.unlocked = true;
+            }
+            localStorage.setItem(key, JSON.stringify(data));
+          }
+          break;
+        }
+      } catch { /* skip invalid entries */ }
+    }
   };
 
   const handleSignUp = async () => {
     setAuthError('');
     setAuthSuccess('');
     setIsLoading(true);
-    
     try {
-      // Validation
-      if (!fullName.trim()) {
-        setAuthError('Please enter your full name');
-        return;
-      }
-
-      if (!emailInput.trim()) {
-        setAuthError('Please enter your email address');
-        return;
-      }
-
-      if (!emailInput.includes('@')) {
-        setAuthError('Please enter a valid email address');
-        return;
-      }
-
-      if (!password.trim()) {
-        setAuthError('Please enter a password');
-        return;
-      }
-
-      if (password.length < 6) {
-        setAuthError('Password must be at least 6 characters long');
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        setAuthError('Passwords do not match');
-        return;
-      }
-
+      if (!fullName.trim()) { setAuthError('Please enter your full name'); return; }
+      if (!username.trim() || username.length < 3) { setAuthError('Username must be at least 3 characters'); return; }
+      if (usernameAvailable === false) { setAuthError('This username is already taken. Please choose another.'); return; }
+      if (!emailInput.trim()) { setAuthError('Please enter your email address'); return; }
+      if (!emailInput.includes('@')) { setAuthError('Please enter a valid email address'); return; }
+      if (!password.trim()) { setAuthError('Please enter a password'); return; }
+      if (password.length < 6) { setAuthError('Password must be at least 6 characters long'); return; }
+      if (password !== confirmPassword) { setAuthError('Passwords do not match'); return; }
       const email = emailInput.toLowerCase().trim();
-      console.log('🚀 Starting signup for:', email);
-
-      // Show checking message
-      setAuthSuccess('🔍 Checking if account already exists...');
-      
-      // Check if user already exists across all sources
+      setAuthSuccess('Checking if account already exists...');
       const existingUser = await findUserAcrossAllSources(email);
-      if (existingUser) {
-        setAuthError('❌ An account with this email already exists. Please sign in instead.');
-        setAuthSuccess('');
-        return;
-      }
-
-      // Show creating message  
-      setAuthSuccess('💾 Creating your account locally...');
+      if (existingUser) { setAuthError('An account with this email already exists. Please sign in instead.'); setAuthSuccess(''); return; }
+      setAuthSuccess('Creating your account...');
       await new Promise(resolve => setTimeout(resolve, 300));
-
-      // Create new user object
       const newUser: LibraryUser = {
         id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        email: email,
-        password: password,
-        full_name: fullName.trim(),
-        created_at: new Date().toISOString()
-      };
+        email, password, full_name: fullName.trim(), created_at: new Date().toISOString(),
+        username: username.toLowerCase().trim()
+      } as any;
+      await storeUserAcrossAllSources(newUser);
 
-      // Store locally first (guaranteed to work)
-      console.log('📱 Storing user locally first...');
-      const existingUsers = JSON.parse(localStorage.getItem('library_users') || '[]');
-      existingUsers.push(newUser);
-      localStorage.setItem('library_users', JSON.stringify(existingUsers));
-      
-      // Store in backup locations too
-      const backupKeys = ['cybercourse_users', 'registered_users', 'user_accounts', 'library_accounts'];
-      backupKeys.forEach(key => {
-        const backupUsers = JSON.parse(localStorage.getItem(key) || '[]');
-        backupUsers.push(newUser);
-        localStorage.setItem(key, JSON.stringify(backupUsers));
-      });
-      
-      // Store in session storage
-      sessionStorage.setItem('current_library_user', JSON.stringify(newUser));
-      
-      console.log('✅ User stored locally successfully');
-      
-      // Show success immediately since local storage worked
-      setAuthSuccess('✅ Account created successfully! You can now sign in.');
-      
-      // Try cloud sync in background (don't wait for it)
-      setAuthSuccess('✅ Account created successfully! Attempting cloud sync for cross-device access...');
-      
-      // Attempt cloud sync without blocking
-      (async () => {
-        try {
-          const timeoutPromise = new Promise<null>((_, reject) => 
-            setTimeout(() => reject(new Error('Cloud sync timeout')), 3000)
-          );
-          
-          const insertPromise = supabase
-            .from('library_users')
-            .insert([{
-              email: newUser.email,
-              password: newUser.password,
-              full_name: newUser.full_name
-            }]);
-          
-          await Promise.race([insertPromise, timeoutPromise]);
-          console.log('✅ Cloud sync successful');
-          setAuthSuccess('🎉 Account created successfully! ✅ Cloud sync complete - works on all devices!');
-        } catch (error) {
-          console.log('⚠️ Cloud sync failed, but account works locally:', error);
-          setAuthSuccess('✅ Account created successfully! ⚠️ Cloud sync had issues but account works on this device.');
-        }
-      })();
+      // Also store username in registered_users_list
+      const registeredUsers = JSON.parse(localStorage.getItem('registered_users_list') || '[]');
+      const regIndex = registeredUsers.findIndex((u: any) => u.email.toLowerCase() === email);
+      if (regIndex >= 0) {
+        registeredUsers[regIndex].username = username.toLowerCase().trim();
+      }
+      localStorage.setItem('registered_users_list', JSON.stringify(registeredUsers));
 
-      // Clear form and switch to sign in after delay
+      // Check and record referral
+      const urlParams = new URLSearchParams(window.location.search);
+      const refCode = urlParams.get('ref');
+      if (refCode) {
+        recordReferral(refCode, email, fullName.trim());
+      }
+
+      trackActivity('signup', `New account created: ${fullName.trim()} (@${username})`);
+      setAuthSuccess('Account created successfully! You can now sign in.');
       setTimeout(() => {
         setCurrentView('signin');
-        setEmailInput('');
-        setPassword('');
-        setConfirmPassword('');
-        setFullName('');
-        setAuthSuccess('');
-        setAuthError('');
-      }, 3000);
-      
-    } catch (error) {
-      console.error('❌ Signup error:', error);
+        setEmailInput(''); setPassword(''); setConfirmPassword(''); setFullName(''); setUsername('');
+        setAuthSuccess(''); setAuthError('');
+      }, 2000);
+    } catch {
       setAuthError('An error occurred during signup. Please try again.');
       setAuthSuccess('');
     } finally {
@@ -532,75 +329,37 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
     setAuthError('');
     setAuthSuccess('');
     setIsLoading(true);
-    
     try {
-      if (!emailInput.trim()) {
-        setAuthError('Please enter your email address');
-        return;
-      }
-
-      if (!emailInput.includes('@')) {
-        setAuthError('Please enter a valid email address');
-        return;
-      }
-
-      if (!password.trim()) {
-        setAuthError('Please enter your password');
-        return;
-      }
-
+      if (!emailInput.trim()) { setAuthError('Please enter your email address'); return; }
+      if (!emailInput.includes('@')) { setAuthError('Please enter a valid email address'); return; }
+      if (!password.trim()) { setAuthError('Please enter your password'); return; }
       const email = emailInput.toLowerCase().trim();
-      console.log('🔐 Starting sign in for:', email);
-
-      // Show searching message as success (not error)
-      setAuthSuccess('🔍 Searching for your account...');
+      setAuthSuccess('Searching for your account...');
       await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Find user across all sources (cloud + local)
       const user = await findUserAcrossAllSources(email);
-      
-      if (!user) {
-        setAuthError('❌ No account found with this email. Please sign up first or check your email address.');
-        setAuthSuccess('');
-        return;
-      }
-
-      // Show password checking message as success
-      setAuthSuccess('🔐 Account found! Verifying password...');
+      if (!user) { setAuthError('No account found with this email. Please sign up first.'); setAuthSuccess(''); return; }
+      setAuthSuccess('Verifying password...');
       await new Promise(resolve => setTimeout(resolve, 200));
-
-      if (user.password !== password) {
-        setAuthError('❌ Incorrect password. Please try again.');
-        setAuthSuccess('');
-        return;
-      }
-
-      // Show success
-      setAuthSuccess('✅ Sign in successful! Loading your library...');
-
-      // Sign in successful
-      console.log('✅ Sign in successful for:', email);
+      if (user.password !== password) { setAuthError('Incorrect password. Please try again.'); setAuthSuccess(''); return; }
+      setAuthSuccess('Sign in successful!');
       setUserEmail(email);
       setIsSignedIn(true);
       loadUserCourses(email);
-
-      // ALWAYS save to localStorage (Remember Me is permanently enabled)
       localStorage.setItem('library_user_email', email);
       localStorage.setItem('library_remember_me', 'true');
-      console.log('💾 User session saved (Remember Me enabled permanently)');
+      trackActivity('signin', `User signed in`);
 
-      // Notify parent component about sign in
-      if (onSignIn) {
-        onSignIn(email);
+      // Update registered user last_active
+      const registeredUsers = JSON.parse(localStorage.getItem('registered_users_list') || '[]');
+      const ri = registeredUsers.findIndex((u: any) => u.email.toLowerCase() === email);
+      if (ri >= 0) {
+        registeredUsers[ri].last_active = new Date().toISOString();
+        localStorage.setItem('registered_users_list', JSON.stringify(registeredUsers));
       }
 
-      // Clear form
-      setEmailInput('');
-      setPassword('');
-      setAuthSuccess('');
-      
-    } catch (error) {
-      console.error('❌ Sign in error:', error);
+      if (onSignIn) onSignIn(email);
+      setEmailInput(''); setPassword(''); setAuthSuccess('');
+    } catch {
       setAuthError('An error occurred during sign in. Please try again.');
       setAuthSuccess('');
     } finally {
@@ -609,21 +368,18 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
   };
 
   const handleSignOut = () => {
-    console.log('🚪 Signing out user:', userEmail);
+    trackActivity('signout', `User signed out`);
     setIsSignedIn(false);
     setUserEmail('');
     setApprovedCourses([]);
     setFilteredCourses([]);
     setSearchTerm('');
-    
-    // Clear localStorage
     localStorage.removeItem('library_user_email');
     localStorage.removeItem('library_remember_me');
-    console.log('🗑️ User session cleared');
   };
 
   const handleAccessCourse = (courseId: string) => {
-    // Import courses data to get drive URL
+    trackActivity('access_course', `Accessed course ID: ${courseId}`);
     import('../data/courses').then(({ courses }) => {
       const course = courses.find(c => c.id === courseId);
       if (course && course.drive_url) {
@@ -636,262 +392,198 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
 
   const getCourseImage = (courseId: string) => {
     const courseImages: { [key: string]: string } = {
-      '1': 'https://images.pexels.com/photos/60504/security-protection-anti-virus-software-60504.jpeg?auto=compress&cs=tinysrgb&w=800',
-      '2': 'https://images.pexels.com/photos/3945313/pexels-photo-3945313.jpeg?auto=compress&cs=tinysrgb&w=800',
-      '3': 'https://images.pexels.com/photos/546819/pexels-photo-546819.jpeg?auto=compress&cs=tinysrgb&w=800',
-      '4': 'https://images.pexels.com/photos/442150/pexels-photo-442150.jpeg?auto=compress&cs=tinysrgb&w=800',
-      '5': 'https://images.pexels.com/photos/265087/pexels-photo-265087.jpeg?auto=compress&cs=tinysrgb&w=800'
+      '1': 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=400&h=250&fit=crop',
+      '2': 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=400&h=250&fit=crop',
+      '3': 'https://images.unsplash.com/photo-1526379095098-d400fd0bf935?w=400&h=250&fit=crop',
+      '4': 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=400&h=250&fit=crop',
+      '5': 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=400&h=250&fit=crop'
     };
-    return courseImages[courseId] || 'https://images.pexels.com/photos/60504/security-protection-anti-virus-software-60504.jpeg?auto=compress&cs=tinysrgb&w=800';
-  };
-
-  const getCourseCategory = (courseId: string) => {
-    const categoryMap: { [key: string]: string } = {
-      '1': 'Cybersecurity',
-      '2': 'Video Editing',
-      '3': 'Programming',
-      '4': 'Cybersecurity',
-      '5': 'Digital Marketing'
-    };
-    return categoryMap[courseId] || 'Course';
-  };
-
-  const getCourseDuration = (courseId: string) => {
-    const durationMap: { [key: string]: string } = {
-      '1': '12 hours',
-      '2': '10 hours',
-      '3': '15 hours',
-      '4': '14 hours',
-      '5': '11 hours'
-    };
-    return durationMap[courseId] || '10 hours';
+    return courseImages[courseId] || 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=400&h=250&fit=crop';
   };
 
   if (!isOpen) return null;
 
-  // Authentication Forms (Sign Up / Sign In)
+  // ============ AUTH FORM (Sign In / Sign Up) ============
   if (!isSignedIn) {
     return (
-      <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div className="bg-black/90 border border-cyan-400/30 rounded-xl max-w-md w-full backdrop-blur-md">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 sm:p-4">
+        <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl overflow-hidden animate-fade-in-up max-h-[95vh] overflow-y-auto scroll-smooth-ios">
           {/* Header */}
-          <div className="p-4 sm:p-6 border-b border-cyan-400/20 bg-gradient-to-r from-cyan-900/20 to-purple-900/20">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <button
-                  onClick={onClose}
-                  className="p-2 hover:bg-cyan-800/30 rounded-lg transition-colors duration-200 mr-2"
-                  title="Back"
-                >
-                  <ArrowLeft className="h-5 w-5 text-cyan-400" />
-                </button>
-                <BookOpen className="h-6 w-6 text-cyan-400" />
-                <h2 className="text-xl sm:text-2xl font-bold text-white font-mono">
-                  {currentView === 'signup' ? 'Create Account' : 'Access Library'}
-                </h2>
-              </div>
-              <button
-                onClick={onClose}
-                className="p-2 hover:bg-cyan-800/30 rounded-full transition-colors duration-200"
-              >
-                <X className="h-5 w-5 sm:h-6 sm:w-6 text-gray-300" />
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors" title="Back">
+                <ArrowLeft className="h-5 w-5 text-gray-500" />
               </button>
+              <BookOpen className="h-5 w-5 text-primary-600" />
+              <h2 className="text-lg font-bold text-gray-900 font-heading">
+                {currentView === 'signup' ? 'Create Account' : 'Access Library'}
+              </h2>
             </div>
+            <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+              <X className="h-5 w-5 text-gray-400" />
+            </button>
           </div>
 
-          {/* Auth Form */}
-          <div className="p-4 sm:p-6">
+          {/* Body */}
+          <div className="p-6">
             <div className="text-center mb-6">
-              <div className="bg-cyan-600/20 border border-cyan-400/30 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                {currentView === 'signup' ? (
-                  <UserPlus className="h-8 w-8 text-cyan-400" />
-                ) : (
-                  <BookOpen className="h-8 w-8 text-cyan-400" />
-                )}
+              <div className="w-16 h-16 bg-primary-50 rounded-2xl mx-auto mb-4 flex items-center justify-center">
+                {currentView === 'signup' ? <UserPlus className="h-8 w-8 text-primary-600" /> : <BookOpen className="h-8 w-8 text-primary-600" />}
               </div>
-              <h3 className="text-lg font-bold text-white mb-2 font-mono">
+              <h3 className="text-xl font-bold text-gray-900 font-heading mb-1">
                 {currentView === 'signup' ? 'Create Your Account' : 'Sign In to Your Library'}
               </h3>
-              <p className="text-gray-400 text-sm font-mono">
-                {currentView === 'signup' 
-                  ? '🌐 Create an account to access your courses from any device'
-                  : '🌐 Sign in to access your courses from any device'
-                }
+              <p className="text-sm text-gray-500">
+                {currentView === 'signup' ? 'Sign up to access your courses from any device' : 'Sign in to access your courses from any device'}
               </p>
             </div>
 
-            {/* Success Message */}
             {authSuccess && (
-              <div className="bg-green-500/10 border border-green-500/30 text-green-400 px-4 py-3 rounded-lg mb-4 text-center text-sm font-mono">
-                {authSuccess}
+              <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl mb-4 text-center text-sm flex items-center justify-center gap-2">
+                <CheckCircle className="h-4 w-4" /> {authSuccess}
               </div>
             )}
-
-            {/* Error Message */}
             {authError && (
-              <div className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-lg mb-4 text-center text-sm font-mono">
+              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl mb-4 text-center text-sm">
                 {authError}
               </div>
             )}
 
             <div className="space-y-4">
-              {/* Full Name (Sign Up Only) */}
               {currentView === 'signup' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2 font-mono">
-                    Full Name *
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Full Name *</label>
                   <div className="relative">
-                    <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                      type="text"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 font-mono text-sm"
-                      placeholder="Enter your full name"
-                      required
-                      disabled={isLoading}
-                    />
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)}
+                      className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm transition-all"
+                      placeholder="Enter your full name" disabled={isLoading} />
                   </div>
                 </div>
               )}
-
-              {/* Email */}
+              {currentView === 'signup' && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Username *</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">@</span>
+                    <input type="text" value={username} onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())}
+                      className={`w-full pl-8 pr-10 py-3 bg-gray-50 border rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 text-sm transition-all ${
+                        username.length >= 3 
+                          ? usernameAvailable === true ? 'border-green-300 focus:ring-green-500 focus:border-green-500' 
+                            : usernameAvailable === false ? 'border-red-300 focus:ring-red-500 focus:border-red-500' 
+                            : 'border-gray-200 focus:ring-primary-500 focus:border-primary-500'
+                          : 'border-gray-200 focus:ring-primary-500 focus:border-primary-500'
+                      }`}
+                      placeholder="choose_a_username" disabled={isLoading} maxLength={20} />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      {checkingUsername && (
+                        <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-availability-check" />
+                      )}
+                      {!checkingUsername && username.length >= 3 && usernameAvailable === true && (
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                      )}
+                      {!checkingUsername && username.length >= 3 && usernameAvailable === false && (
+                        <X className="h-4 w-4 text-red-500" />
+                      )}
+                    </div>
+                  </div>
+                  {username.length >= 3 && !checkingUsername && (
+                    <p className={`text-xs mt-1 font-medium ${usernameAvailable ? 'text-green-600' : 'text-red-500'}`}>
+                      {usernameAvailable ? '✓ Username is available!' : '✗ Username is already taken'}
+                    </p>
+                  )}
+                  {username.length > 0 && username.length < 3 && (
+                    <p className="text-xs mt-1 text-gray-400">Minimum 3 characters</p>
+                  )}
+                </div>
+              )}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2 font-mono">
-                  Email Address *
-                </label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Email Address *</label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="email"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 font-mono text-sm"
-                    placeholder="Enter your email address"
-                    required
-                    disabled={isLoading}
-                  />
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input type="email" value={emailInput} onChange={(e) => setEmailInput(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm transition-all"
+                    placeholder="Enter your email address" disabled={isLoading} />
                 </div>
               </div>
-
-              {/* Password */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2 font-mono">
-                  Password *
-                </label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Password *</label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-10 pr-12 py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 font-mono text-sm"
-                    placeholder={currentView === 'signup' ? 'Create a password (min 6 chars)' : 'Enter your password'}
-                    required
-                    disabled={isLoading}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-300 transition-colors duration-200"
-                    disabled={isLoading}
-                  >
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)}
+                    className="w-full pl-10 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm transition-all"
+                    placeholder="Enter your password" disabled={isLoading} />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors" disabled={isLoading}>
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                {currentView === 'signup' && password.length > 0 && (
+                  <div className="mt-2">
+                    <div className="flex gap-1 mb-1">
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <div key={i} className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
+                          i <= passwordStrength
+                            ? passwordStrength <= 2 ? 'bg-red-400' : passwordStrength <= 3 ? 'bg-yellow-400' : 'bg-green-400'
+                            : 'bg-gray-200'
+                        }`} />
+                      ))}
+                    </div>
+                    <p className={`text-xs font-medium ${
+                      passwordStrength <= 2 ? 'text-red-500' : passwordStrength <= 3 ? 'text-yellow-600' : 'text-green-600'
+                    }`}>
+                      {passwordStrength <= 1 ? 'Weak' : passwordStrength <= 2 ? 'Fair' : passwordStrength <= 3 ? 'Good' : passwordStrength <= 4 ? 'Strong' : 'Very Strong'}
+                    </p>
+                  </div>
+                )}
               </div>
-
-              {/* Confirm Password (Sign Up Only) */}
               {currentView === 'signup' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2 font-mono">
-                    Confirm Password *
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Confirm Password *</label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full pl-10 pr-12 py-3 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 font-mono text-sm"
-                      placeholder="Confirm your password"
-                      required
-                      disabled={isLoading}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-300 transition-colors duration-200"
-                      disabled={isLoading}
-                    >
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input type={showConfirmPassword ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full pl-10 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm transition-all"
+                      placeholder="Confirm your password" disabled={isLoading} />
+                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors" disabled={isLoading}>
                       {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Auto Remember Me Notice */}
-              <div className="bg-cyan-600/20 border border-cyan-400/30 rounded-lg p-3">
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
-                  <span className="text-cyan-400 text-sm font-mono">
-                    🔒 Auto-Remember: You'll stay signed in across all your devices
-                  </span>
-                </div>
+              {/* Trust Badge */}
+              <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 flex items-center gap-2">
+                <Shield className="h-4 w-4 text-primary-600 flex-shrink-0" />
+                <span className="text-primary-700 text-sm font-medium">
+                  Auto-Remember: You'll stay signed in across all your devices
+                </span>
               </div>
 
-              {/* Submit Button */}
-              <button
-                onClick={currentView === 'signup' ? handleSignUp : handleSignIn}
-                disabled={isLoading}
-                className="w-full bg-gradient-to-r from-cyan-600 to-purple-600 text-white py-3 px-4 rounded-lg font-bold hover:from-cyan-700 hover:to-purple-700 transition-all duration-200 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
+              <button onClick={currentView === 'signup' ? handleSignUp : handleSignIn} disabled={isLoading}
+                className="w-full bg-primary-600 hover:bg-primary-700 text-white py-3.5 rounded-xl font-bold text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-btn hover:shadow-lg flex items-center justify-center gap-2">
                 {isLoading ? (
-                  <div className="flex items-center justify-center space-x-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    <span>{currentView === 'signup' ? 'Creating Account...' : 'Signing In...'}</span>
-                  </div>
+                  <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span>{currentView === 'signup' ? 'Creating Account...' : 'Signing In...'}</span></>
                 ) : (
-                  currentView === 'signup' ? '🌐 Create Cross-Device Account' : '🌐 Access My Library'
+                  <><Sparkles className="h-4 w-4" />
+                  <span>{currentView === 'signup' ? 'Create Account' : 'Access My Library'}</span></>
                 )}
               </button>
 
-              {/* Switch View */}
               <div className="text-center">
-                <button
-                  onClick={() => {
-                    setCurrentView(currentView === 'signup' ? 'signin' : 'signup');
-                    setAuthError('');
-                    setAuthSuccess('');
-                    setEmailInput('');
-                    setPassword('');
-                    setConfirmPassword('');
-                    setFullName('');
-                  }}
-                  className="text-cyan-400 hover:text-cyan-300 transition-colors duration-200 font-mono text-sm"
-                  disabled={isLoading}
-                >
-                  {currentView === 'signup' 
-                    ? 'Already have an account? Sign In' 
-                    : "Don't have an account? Sign Up"
-                  }
+                <button onClick={() => { setCurrentView(currentView === 'signup' ? 'signin' : 'signup'); setAuthError(''); setAuthSuccess(''); setEmailInput(''); setPassword(''); setConfirmPassword(''); setFullName(''); setUsername(''); setUsernameAvailable(null); }}
+                  className="text-primary-600 hover:text-primary-700 transition-colors text-sm font-medium" disabled={isLoading}>
+                  {currentView === 'signup' ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
                 </button>
               </div>
             </div>
 
-            <div className="mt-6 text-center">
-              <p className="text-gray-400 text-xs font-mono">
-                {currentView === 'signup' 
-                  ? '✅ Account works locally, cloud sync attempted for cross-device access'
-                  : '🔍 Searches all devices and cloud for your account'
-                }
-              </p>
-              <p className="text-gray-400 text-xs font-mono mt-2">
+            <div className="mt-5 pt-4 border-t border-gray-100 text-center">
+              <p className="text-gray-400 text-xs">
                 Need help? Contact{' '}
-                <a href="mailto:adarshkosta1@gmail.com" className="text-cyan-400 hover:text-cyan-300">
-                  adarshkosta1@gmail.com
-                </a>
+                <a href="mailto:adarshkosta1@gmail.com" className="text-primary-600 hover:text-primary-700 font-medium">adarshkosta1@gmail.com</a>
               </p>
             </div>
           </div>
@@ -900,227 +592,123 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
     );
   }
 
-  // Main Library Content (when signed in)
+  // ============ LIBRARY CONTENT (Signed In) ============
   return (
-    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-black/90 border border-cyan-400/30 rounded-xl max-w-6xl w-full max-h-[90vh] overflow-hidden backdrop-blur-md">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 sm:p-4">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-5xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden shadow-2xl animate-fade-in-up">
         {/* Header */}
-        <div className="p-4 sm:p-6 border-b border-cyan-400/20 bg-gradient-to-r from-cyan-900/20 to-purple-900/20">
+        <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-primary-50 to-purple-50">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <button
-                onClick={onClose}
-                className="p-2 hover:bg-cyan-800/30 rounded-lg transition-colors duration-200 mr-2"
-                title="Back"
-              >
-                <ArrowLeft className="h-5 w-5 text-cyan-400" />
+              <button onClick={onClose} className="p-1.5 hover:bg-white/60 rounded-lg transition-colors" title="Back">
+                <ArrowLeft className="h-5 w-5 text-primary-600" />
               </button>
-              <BookOpen className="h-6 w-6 text-cyan-400" />
+              <BookOpen className="h-5 w-5 text-primary-600" />
               <div>
-                <h2 className="text-xl sm:text-2xl font-bold text-white font-mono">My Course Library</h2>
-                <p className="text-sm text-gray-400 font-mono">Welcome back, {userEmail}</p>
+                <h2 className="text-lg font-bold text-gray-900 font-heading">My Course Library</h2>
+                <p className="text-xs text-gray-500">Welcome back, {userEmail}</p>
               </div>
-              <span className="bg-green-600/20 text-green-400 px-3 py-1 rounded-full text-sm font-mono">
+              <span className="bg-green-100 text-green-700 px-2.5 py-0.5 rounded-full text-xs font-semibold">
                 {filteredCourses.filter(c => c.has_access).length} Available
               </span>
             </div>
-            <div className="flex items-center space-x-3">
-              <button
-                onClick={handleSignOut}
-                className="flex items-center space-x-2 bg-red-600/20 hover:bg-red-600/30 border border-red-400/30 text-red-400 px-3 py-2 rounded-lg transition-colors duration-200 font-mono text-sm"
-              >
-                <LogOut className="h-4 w-4" />
-                <span>Sign Out</span>
+            <div className="flex items-center space-x-2">
+              <button onClick={handleSignOut}
+                className="flex items-center space-x-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium">
+                <LogOut className="h-3.5 w-3.5" /><span>Sign Out</span>
               </button>
-              <button
-                onClick={onClose}
-                className="p-2 hover:bg-cyan-800/30 rounded-full transition-colors duration-200"
-              >
-                <X className="h-5 w-5 sm:h-6 sm:w-6 text-gray-300" />
+              <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+                <X className="h-5 w-5 text-gray-400" />
               </button>
             </div>
           </div>
         </div>
 
-        {/* Search Bar */}
-        <div className="p-4 sm:p-6 border-b border-cyan-400/20 bg-black/50">
+        {/* Search */}
+        <div className="px-6 py-3 border-b border-gray-100 bg-gray-50/50">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search your courses..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-black/50 border border-cyan-400/30 rounded-lg focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 text-white placeholder-gray-500 font-mono text-sm"
-            />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input type="text" placeholder="Search your courses..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm" />
           </div>
         </div>
 
         {/* Content */}
-        <div className="p-4 sm:p-6 max-h-96 overflow-y-auto">
+        <div className="p-6 max-h-[60vh] overflow-y-auto">
           {filteredCourses.length === 0 ? (
-            <div className="text-center py-8 sm:py-12">
-              <BookOpen className="h-12 w-12 sm:h-16 sm:w-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg sm:text-xl font-semibold text-white mb-2 font-mono">
-                {approvedCourses.length === 0 ? "No Purchases Found" : "No Courses Found"}
+            <div className="text-center py-12">
+              <BookOpen className="h-14 w-14 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-bold text-gray-900 mb-2 font-heading">
+                {approvedCourses.length === 0 ? 'No Purchases Yet' : 'No Courses Found'}
               </h3>
-              <p className="text-gray-400 font-mono text-sm sm:text-base">
-                {approvedCourses.length === 0 
-                  ? "You haven't purchased any courses yet. Browse and purchase courses to see them here!"
-                  : "No courses match your search criteria."
-                }
+              <p className="text-gray-500 text-sm mb-4">
+                {approvedCourses.length === 0 ? "You haven't purchased any courses yet. Browse and purchase courses to see them here!" : 'No courses match your search.'}
               </p>
               {approvedCourses.length === 0 && (
-                <div className="mt-4">
-                  <button 
-                    onClick={onClose} 
-                    className="bg-gradient-to-r from-cyan-600 to-purple-600 text-white px-6 py-3 rounded-lg font-bold hover:from-cyan-700 hover:to-purple-700 transition-all duration-200 font-mono"
-                  >
-                    Browse Courses
-                  </button>
-                </div>
+                <button onClick={onClose}
+                  className="bg-primary-600 hover:bg-primary-700 text-white px-6 py-2.5 rounded-xl font-semibold transition-all shadow-btn text-sm">
+                  Browse Courses
+                </button>
               )}
             </div>
           ) : (
             <div>
-              {/* Course Stats */}
-              <div className="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-black/50 border border-green-400/30 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-green-400 font-mono">{filteredCourses.filter(c => c.has_access).length}</div>
-                  <div className="text-sm text-gray-400 font-mono">Available</div>
+              {/* Stats */}
+              <div className="mb-6 grid grid-cols-3 gap-3">
+                <div className="bg-green-50 border border-green-100 rounded-xl p-3 text-center">
+                  <div className="text-2xl font-bold text-green-600">{filteredCourses.filter(c => c.has_access).length}</div>
+                  <div className="text-xs text-green-600 font-medium">Available</div>
                 </div>
-                <div className="bg-black/50 border border-cyan-400/30 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-yellow-400 font-mono">{filteredCourses.filter(c => !c.has_access).length}</div>
-                  <div className="text-sm text-gray-400 font-mono">Pending</div>
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center">
+                  <div className="text-2xl font-bold text-amber-600">{filteredCourses.filter(c => !c.has_access).length}</div>
+                  <div className="text-xs text-amber-600 font-medium">Pending</div>
                 </div>
-                <div className="bg-black/50 border border-purple-400/30 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-cyan-400 font-mono">
-                    {filteredCourses.length}
-                  </div>
-                  <div className="text-sm text-gray-400 font-mono">Total Courses</div>
+                <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 text-center">
+                  <div className="text-2xl font-bold text-primary-600">{filteredCourses.length}</div>
+                  <div className="text-xs text-primary-600 font-medium">Total</div>
                 </div>
               </div>
 
               {/* Course Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredCourses.map((course) => (
-                  <div 
-                    key={course.id} 
-                    className={`bg-black/50 border rounded-lg overflow-hidden transition-all duration-200 hover:scale-105 group ${
-                      course.has_access 
-                        ? 'border-green-400/30 hover:border-green-400 cursor-pointer' 
-                        : 'border-yellow-400/30 hover:border-yellow-400 cursor-default'
+                  <div key={course.id}
+                    className={`bg-white border rounded-xl overflow-hidden transition-all duration-200 hover:shadow-card group ${
+                      course.has_access ? 'border-green-200 cursor-pointer' : 'border-amber-200 cursor-default'
                     }`}
-                    onClick={() => course.has_access && handleAccessCourse(course.course_id)}
-                  >
+                    onClick={() => course.has_access && handleAccessCourse(course.course_id)}>
                     <div className="relative">
-                      <img 
-                        src={getCourseImage(course.course_id)} 
-                        alt={course.course_title}
-                        className={`w-full h-32 sm:h-40 object-cover transition-transform duration-300 ${
-                          course.has_access ? 'group-hover:scale-110' : 'opacity-75'
-                        }`}
-                      />
+                      <img src={getCourseImage(course.course_id)} alt={course.course_title}
+                        className={`w-full h-36 object-cover transition-transform duration-300 ${course.has_access ? 'group-hover:scale-105' : 'opacity-80'}`} />
                       <div className="absolute top-2 right-2">
-                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                          course.has_access 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {course.has_access ? '✅ APPROVED' : '⏳ PENDING'}
-                        </span>
-                      </div>
-                      <div className="absolute top-2 left-2">
-                        <span className={`px-2 py-1 rounded-full text-xs font-bold border ${
-                          course.has_access 
-                            ? 'bg-cyan-400/20 border-cyan-400/50 text-cyan-400' 
-                            : 'bg-yellow-400/20 border-yellow-400/50 text-yellow-400'
-                        }`}>
-                          {course.has_access ? '🎓 READY' : '⏰ WAITING'}
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                          course.has_access ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {course.has_access ? '✅ Approved' : '⏳ Pending'}
                         </span>
                       </div>
                       {course.has_access && (
-                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                          <div className="bg-green-600/80 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-bold transition-all duration-200 flex items-center space-x-2 font-mono">
-                            <Play className="h-4 w-4" />
-                            <span>OPEN COURSE</span>
-                            <ExternalLink className="h-4 w-4" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                          <div className="bg-white text-primary-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg">
+                            <Play className="h-4 w-4" /> Open Course <ExternalLink className="h-3.5 w-3.5" />
                           </div>
                         </div>
                       )}
                     </div>
-                    
                     <div className="p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-cyan-400 bg-cyan-400/10 border border-cyan-400/30 px-2 py-1 rounded font-mono">
-                          {getCourseCategory(course.course_id)}
-                        </span>
-                        <div className="flex items-center space-x-1">
-                          <Star className="h-3 w-3 text-yellow-400 fill-current" />
-                          <span className="text-xs text-gray-400 font-mono">4.8</span>
-                        </div>
-                      </div>
-                      
-                      <h3 className={`text-sm sm:text-base font-bold mb-2 line-clamp-2 font-mono leading-tight transition-colors duration-200 ${
-                        course.has_access 
-                          ? 'text-white group-hover:text-green-400' 
-                          : 'text-gray-300'
-                      }`}>
+                      <h3 className={`text-sm font-bold mb-2 line-clamp-2 leading-tight transition-colors ${
+                        course.has_access ? 'text-gray-900 group-hover:text-primary-600' : 'text-gray-600'}`}>
                         {course.course_title}
                       </h3>
-                      
-                      <div className="flex items-center justify-between mb-3 text-xs font-mono">
-                        <div className="flex items-center space-x-1 text-gray-400">
-                          <Clock className="h-3 w-3 text-cyan-400" />
-                          <span>{getCourseDuration(course.course_id)}</span>
+                      <div className="flex items-center justify-between mb-3 text-xs">
+                        <div className="flex items-center gap-1 text-gray-400">
+                          <Clock className="h-3 w-3" />
+                          <span>Course</span>
                         </div>
-                        <span className={`font-bold ${course.has_access ? 'text-green-400' : 'text-yellow-400'}`}>
-                          ₹{course.amount_paid}
-                        </span>
+                        <span className={`font-bold ${course.has_access ? 'text-green-600' : 'text-amber-600'}`}>₹{course.amount_paid}</span>
                       </div>
-                      
-                      <div className="text-xs text-gray-500 font-mono mb-3">
-                        {course.has_access 
-                          ? `Approved: ${new Date(course.approved_at).toLocaleDateString()}`
-                          : `Purchased: ${new Date(course.approved_at).toLocaleDateString()}`
-                        }
-                      </div>
-                      
-                      <div className="space-y-2">
-                        {course.has_access ? (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAccessCourse(course.course_id);
-                            }}
-                            className="w-full bg-gradient-to-r from-green-600 to-cyan-600 text-white py-2 px-3 rounded-lg font-bold hover:from-green-700 hover:to-cyan-700 transition-all duration-200 font-mono text-xs flex items-center justify-center space-x-2 hover:scale-105"
-                          >
-                            <Play className="h-3 w-3" />
-                            <span>START LEARNING</span>
-                            <ExternalLink className="h-3 w-3" />
-                          </button>
-                        ) : (
-                          <button
-                            disabled
-                            className="w-full bg-yellow-600/20 border border-yellow-400/30 text-yellow-400 py-2 px-3 rounded-lg font-bold cursor-not-allowed font-mono text-xs flex items-center justify-center space-x-2"
-                          >
-                            <Clock className="h-3 w-3" />
-                            <span>WAITING FOR APPROVAL</span>
-                          </button>
-                        )}
-                        
-                        <div className="text-center">
-                          <span className={`text-xs font-mono ${
-                            course.has_access 
-                              ? 'text-green-400' 
-                              : 'text-yellow-400'
-                          }`}>
-                            {course.has_access 
-                              ? '🚀 Click to Access Course Content' 
-                              : '⏳ Your purchase is being reviewed by admin'
-                            }
-                          </span>
-                        </div>
+                      <div className="flex items-center gap-1 text-xs text-gray-400">
+                        <Star className="h-3 w-3 text-yellow-400 fill-current" />
+                        <span>4.8 • {course.has_access ? `Approved ${new Date(course.approved_at).toLocaleDateString()}` : 'Awaiting approval'}</span>
                       </div>
                     </div>
                   </div>
@@ -1131,19 +719,13 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ isOpen, onClose, onSignIn }
         </div>
 
         {/* Footer */}
-        <div className="p-4 sm:p-6 border-t border-cyan-400/20 bg-black/50">
-          <div className="text-center space-y-2">
-            <div className="flex items-center justify-center space-x-4 text-xs font-mono">
-              <span className="text-green-400">✅ {filteredCourses.filter(c => c.has_access).length} Available</span>
-              <span className="text-yellow-400">⏳ {filteredCourses.filter(c => !c.has_access).length} Pending</span>
-              <span className="text-cyan-400">🌐 Cross-Device Access</span>
+        <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50">
+          <div className="flex items-center justify-between text-xs text-gray-400">
+            <div className="flex items-center gap-3">
+              <span className="text-green-600 font-medium">✅ {filteredCourses.filter(c => c.has_access).length} Available</span>
+              <span className="text-amber-600 font-medium">⏳ {filteredCourses.filter(c => !c.has_access).length} Pending</span>
             </div>
-            <p className="text-gray-400 text-xs sm:text-sm font-mono">
-              Signed in as: <span className="text-cyan-400">{userEmail}</span> • 🔒 Auto-remembered across devices • Need help? Contact{' '}
-              <a href="mailto:adarshkosta1@gmail.com" className="text-cyan-400 hover:text-cyan-300">
-                adarshkosta1@gmail.com
-              </a>
-            </p>
+            <span>Signed in as <span className="text-primary-600 font-medium">{userEmail}</span></span>
           </div>
         </div>
       </div>
